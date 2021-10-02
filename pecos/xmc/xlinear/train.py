@@ -217,6 +217,15 @@ def parse_arguments():
         help="keep at most NONZEROS weight parameters per label in model(default 0 to denote nr_features + 1)",
     )
 
+    # remem: Warm start
+    parser.add_argument(
+        "-mw",
+        "--model-path-warm-start",
+        type=str,
+        metavar="DIR",
+        help="path to the warm start model folder.",
+    )
+    
     # Prediction kwargs
     parser.add_argument(
         "-k",
@@ -302,24 +311,51 @@ def do_train(args):
         if getattr(args, kw, None) is not None:
             pred_kwargs[kw] = getattr(args, kw)
 
-    xlm = XLinearModel.train(
-        X,
-        Y,
-        cluster_chain,
-        user_supplied_negatives=usn_match_dict,
-        negative_sampling_scheme=args.negative_sampling,
-        pred_kwargs=pred_kwargs,
-        nr_splits=args.nr_splits,
-        threads=args.threads,
-        solver_type=args.solver_type,
-        Cp=args.Cp,
-        Cn=args.Cn,
-        bias=args.bias,
-        threshold=args.threshold,
-        max_nonzeros_per_label=args.max_nonzeros_per_label,
-    )
+    # remem: initial point -> load Xlinear model
+    # match each layer's w
+    # if cluster change (situation will be complicated) -> make the clusters fix first 
+    if args.model_path_warm_start:
+        xlinear_model = XLinearModel.load(
+            args.model_path_warm_start, is_predict_only=False, is_warm_start=True
+        ) # TODO weight_matrix_type no need? look at predict.py
+    # print(args.model_path_warm_start) # - done
+        xlm = xlinear_model.fine_tune(
+            X,
+            Y,
+            cluster_chain,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
+            nr_splits=args.nr_splits,
+            threads=args.threads,
+            solver_type=args.solver_type,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
+        )
+        # print("done")
+    else:
+        xlm = XLinearModel.train(
+            X,
+            Y,
+            cluster_chain,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
+            nr_splits=args.nr_splits,
+            threads=args.threads,
+            solver_type=args.solver_type,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
+        )
 
-    xlm.save(args.model_folder)
+    # xlm.save(args.model_folder) # TODO: uncomment this after having xlm object
+    # print("done")
 
 
 if __name__ == "__main__":

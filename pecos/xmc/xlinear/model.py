@@ -95,7 +95,7 @@ class XLinearModel(pecos.BaseClass):
         self.model.save(path.join(model_folder, "ranker"))
 
     @classmethod
-    def load(cls, model_folder, is_predict_only=False, **kwargs):
+    def load(cls, model_folder, is_predict_only=False, is_warm_start=False, **kwargs):
         """Load the XLinear model from file
 
         Args:
@@ -120,8 +120,9 @@ class XLinearModel(pecos.BaseClass):
         Returns:
             XLinearModel
         """
+        print("1 XLinearModel, return cls(model)")
         model = HierarchicalMLModel.load(
-            path.join(model_folder, "ranker"), is_predict_only, **kwargs
+            path.join(model_folder, "ranker"), is_predict_only, is_warm_start, **kwargs
         )
         return cls(model)
 
@@ -181,6 +182,7 @@ class XLinearModel(pecos.BaseClass):
         if pred_params is None:
             pred_params = cls.PredParams()
             pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
+            # print(pred_params) # XLinearModel.PredParams(hlm_args=HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams(only_topk=20, post_processor='l3-hinge')))
         else:
             pred_params = cls.PredParams.from_dict(pred_params)
         # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
@@ -228,6 +230,97 @@ class XLinearModel(pecos.BaseClass):
             **kwargs,
         )
         return cls(model)
+
+    # remem
+    def fine_tune(
+        self,
+        X,
+        Y,
+        C=None,
+        user_supplied_negatives=None,
+        train_params=None,
+        pred_params=None,
+        **kwargs,
+    ):
+        """Training method for XLinearModel
+
+        Args:
+            X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
+            Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
+            C (csc_matrix(float32), list/tuple of csc_matrices or ClusterChain, optional): indexer matrix or cluster chain.
+                Defaults to None
+            user_supplied_negatives (dict, optional): dictionary of usn matching matrices.
+                See ClusterChain.generate_matching_chain. Defaults to None.
+            train_params (XLinearModel.TrainParams, optional): instance of XLinearModel.TrainParams
+            pred_params (XLinearModel.PredParams, optional): instance of XLinearModel.PredParams
+            kwargs:
+                {"beam_size": INT, "only_topk": INT, "post_processor": STR},
+                Default None to use HierarchicalMLModel.PredParams defaults
+
+        Returns:
+            XLinearModel: the trained XLinearModel
+        """
+
+        if train_params is None:  # for backward compatibility
+            train_params = self.TrainParams.from_dict(kwargs)
+            train_params.hlm_args = HierarchicalMLModel.TrainParams(
+                neg_mining_chain=kwargs.get("negative_sampling_scheme", "tfn"),
+                model_chain=MLModel.TrainParams.from_dict(kwargs),
+            )
+        else:
+            train_params = self.TrainParams.from_dict(train_params)
+
+        if pred_params is None:
+            pred_params = self.PredParams()
+            pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
+        else:
+            pred_params = self.PredParams.from_dict(pred_params)
+        # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
+
+        if not train_params.min_codes:
+            train_params.min_codes = train_params.nr_splits
+
+        if C is None or (isinstance(C, (list, tuple)) and len(C) == 0):
+            clustering = None
+            matching_chain = None
+        else:
+            if train_params.shallow:
+                clustering = ClusterChain.from_partial_chain(C, min_codes=None)
+            else:
+                clustering = ClusterChain.from_partial_chain(
+                    C, min_codes=train_params.min_codes, nr_splits=train_params.nr_splits
+                )
+            matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
+
+        if train_params.mode == "full-model":
+            pass
+        elif train_params.mode == "matcher":
+            if clustering is None:
+                raise ValueError("Expect non-trivial clustering for matcher mode")
+            for cc in reversed(clustering[-train_params.ranker_level :]):
+                Y = Y.dot(cc).tocsc()
+            clustering = ClusterChain(clustering[: -train_params.ranker_level])
+            matching_chain = matching_chain[: -train_params.ranker_level]
+        elif train_params.mode == "ranker":
+            if clustering is None:
+                raise ValueError("Expect non-trivial clustering for ranker mode")
+            clustering = ClusterChain(clustering[-train_params.ranker_level :])
+            matching_chain = matching_chain[-train_params.ranker_level :]
+        else:
+            raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+
+        prob = MLProblem(X, Y)
+        # remem: use self.model.fine_tune() to replace HierarchicalMLModel.train
+        # hierarchical_mlmodel = HierarchicalMLModel()
+        model = self.model.fine_tune(
+            prob,
+            clustering=clustering,
+            matching_chain=matching_chain,
+            train_params=train_params.hlm_args,
+            pred_params=pred_params.hlm_args,
+            **kwargs,
+        )
+        # if use @classmthod: return cls(model)
 
     def set_output_constraint(self, labels_to_keep):
         """
@@ -465,6 +558,7 @@ class XLinearModel(pecos.BaseClass):
                     pred_params=None if pred_params is None else pred_params.hlm_args,
                     **kwargs,
                 )
+                print("XLinearModel predict, Y_pred")
             else:
                 Y_pred = self.model.predict_on_selected_outputs(
                     X,

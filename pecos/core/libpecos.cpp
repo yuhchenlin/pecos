@@ -215,6 +215,50 @@ extern "C" {
     C_XLINEAR_SINGLE_LAYER_TRAIN(_csr_f32, ScipyCsrF32, pecos::csr_t)
     C_XLINEAR_SINGLE_LAYER_TRAIN(_drm_f32, ScipyDrmF32, pecos::drm_t)
 
+
+    #define C_XLINEAR_SINGLE_LAYER_FINE_TUNE(SUFFIX, PY_MAT, C_MAT) \
+    void c_xlinear_single_layer_fine_tune ## SUFFIX( \
+        ScipyCscF32* W, \
+        const PY_MAT *pX, \
+        const ScipyCscF32 *pY, \
+        const ScipyCscF32 *pC, \
+        const ScipyCscF32 *pM, \
+        const ScipyCscF32 *pR, \
+        py_coo_allocator_t coo_alloc, \
+        double threshold, \
+        uint32_t max_nonzeros_per_label, \
+        int solver_type, \
+        double Cp, \
+        double Cn, \
+        size_t max_iter, \
+        double eps, \
+        double bias, \
+        int threads) { \
+        pecos::csc_t W_ = pecos::csc_t(W); \
+        const C_MAT feat_mat(pX); \
+        const pecos::csc_t Y(pY); \
+        const pecos::csc_t& C = (pC == NULL) ? pecos::csc_t() : pecos::csc_t(pC); \
+        const pecos::csc_t& M = (pM == NULL) ? pecos::csc_t() : pecos::csc_t(pM); \
+        const pecos::csc_t& R = (pR == NULL) ? pecos::csc_t() : pecos::csc_t(pR); \
+        pecos::linear_solver::SVMParameter param(solver_type, Cp, Cn, max_iter, eps, bias); \
+        pecos::coo_t model; \
+        pecos::linear_solver::multilabel_train_with_codes(\
+            &feat_mat, \
+            &Y, \
+            (pC == NULL) ? NULL : &C, \
+            (pM == NULL) ? NULL : &M, \
+            (pR == NULL) ? NULL : &R, \
+            &model, \
+            threshold, \
+            max_nonzeros_per_label, \
+            &param, \
+            threads \
+        ); \
+        model.create_pycoo(coo_alloc); \
+    }
+    C_XLINEAR_SINGLE_LAYER_FINE_TUNE(_csr_f32, ScipyCsrF32, pecos::csr_t)
+    C_XLINEAR_SINGLE_LAYER_FINE_TUNE(_drm_f32, ScipyDrmF32, pecos::drm_t)
+
     // ==== C Interface of Sparse Matrix/Vector Operations ====
 
     #define C_SPARSE_MATMUL(SUFFIX, PY_MAT, C_MAT) \

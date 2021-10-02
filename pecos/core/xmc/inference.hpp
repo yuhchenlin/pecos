@@ -2243,7 +2243,7 @@ namespace pecos {
             model->init(layers);
         }
 
-        HierarchicalMLModel(
+        HierarchicalMLModel( // remem: initialize class
             const std::string& folderpath,
             layer_type_t layer_type = DEFAULT_LAYER_TYPE
         ) {

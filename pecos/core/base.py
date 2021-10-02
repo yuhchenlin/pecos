@@ -38,7 +38,12 @@ from pecos.utils import smat_util
 
 LOGGER = logging.getLogger("__name__")
 
-XLINEAR_SOLVERS = {"L2R_L2LOSS_SVC_DUAL": 1, "L2R_L1LOSS_SVC_DUAL": 3, "L2R_LR_DUAL": 7}
+XLINEAR_SOLVERS = {
+    "L2R_L2LOSS_SVC_DUAL": 1,
+    "L2R_L1LOSS_SVC_DUAL": 3,
+    "L2R_LR_DUAL": 7,
+    "L2R_L2LOSS_SVC_PRIMAL": 2,
+}
 # Ordering must be consistent with with layer_type_t definition within inference.hpp
 XLINEAR_INFERENCE_MODEL_TYPES = {"CSC": 0, "HASH_CHUNKED": 1, "BINARY_SEARCH_CHUNKED": 2}
 TFIDF_TOKENIZER_CODES = {"word": 10, "char": 20, "char_wb": 30}
@@ -536,6 +541,18 @@ class corelib(object):
             None,
             [POINTER(ScipyDrmF32)] + arg_list[1:],
         )
+        # remem
+        corelib.fillprototype(
+            self.clib_float32.c_xlinear_single_layer_fine_tune_csr_f32,
+            None,
+            [POINTER(ScipyCsrF32)] + arg_list[1:],
+        )
+        corelib.fillprototype(
+            self.clib_float32.c_xlinear_single_layer_fine_tune_drm_f32,
+            None,
+            [POINTER(ScipyDrmF32)] + arg_list[1:],
+        )
+
 
         arg_list = [c_void_p]
         corelib.fillprototype(self.clib_float32.c_xlinear_destruct_model, None, arg_list)
@@ -691,10 +708,33 @@ class corelib(object):
             cmodel (ptr): The pointer to xlinear model.
         """
         weight_matrix_type_id = XLINEAR_INFERENCE_MODEL_TYPES[weight_matrix_type]
+        print("3 core xlinear_load_predict_only, return cmodel from c_xlinear_load_model_from_disk_ext")
         cmodel = self.clib_float32.c_xlinear_load_model_from_disk_ext(
             c_char_p(folder.encode("utf-8")), c_int(int(weight_matrix_type_id))
         )
         return cmodel
+
+    # remem: TODO: now use c_xlinear_load_model_from_disk_ext
+    def xlinear_load_warm_start(
+        self,
+        folder,
+        weight_matrix_type="BINARY_SEARCH_CHUNKED",
+    ):
+        """
+        Load xlinear model in predict only mode.
+
+        Args:
+            folder (str): The folder path for xlinear model.
+            weight_matrix_type (str, optional): The xlinear inference model types.
+
+        Return:
+            cmodel (ptr): The pointer to xlinear model.
+        """
+        weight_matrix_type_id = XLINEAR_INFERENCE_MODEL_TYPES[weight_matrix_type]
+        cmodel = self.clib_float32.c_xlinear_load_model_from_disk_ext(
+            c_char_p(folder.encode("utf-8")), c_int(int(weight_matrix_type_id))
+        )
+        return cmodel    
 
     def xlinear_destruct_model(self, c_model):
         """
@@ -760,6 +800,81 @@ class corelib(object):
             threads,
             pred_alloc.cfunc,
         )
+    # remem
+    def xlinear_fine_tune(
+        self,
+        c_model,
+        pX,
+        pY,
+        pC,
+        pM,
+        pR,
+        threshold=0.1,
+        max_nonzeros_per_label=None,
+        solver_type="L2R_L2LOSS_SVC_DUAL",
+        Cp=1.0,
+        Cn=1.0,
+        max_iter=1000,
+        eps=0.01,
+        bias=1.0,
+        threads=-1,
+        verbose=0,
+        **kwargs,
+    ):
+        """
+        Performs a single layer training in C++ using matrices owned by Python.
+
+        Args:
+            pX (ScipyCsrF32 or ScipyDrmF32): Instance feature matrix of shape (nr_inst, nr_feat).
+            pY (ScipyCscF32): Label matrix of shape (nr_inst, nr_labels).
+            pC (ScipyCscF32): Single matrix from clustering chain, representing a hierarchical clustering.
+            pM (ScipyCsrF32): Single matrix from matching chain.
+            pR (ScipyCscF32): Relevance matrix for cost-sensitive learning, of shape (nr_inst, nr_labels).
+            threshold (float, optional): sparsify the final model by eliminating all entrees with abs value less than threshold.
+                Default to 0.1.
+            max_nonzeros_per_label (int, optional): keep at most NONZEROS weight parameters per label in model.
+                Default None to set to (nr_feat + 1)
+            solver_type (string, optional): backend linear solver type.
+                Options: L2R_L2LOSS_SVC_DUAL(default), L2R_L1LOSS_SVC_DUAL.
+            Cp (float, optional): positive penalty parameter. Defaults to 1.0
+            Cn (float, optional): negative penalty parameter. Defaults to 1.0
+            max_iter (int, optional): maximum iterations. Defaults to 100
+            eps (float, optional): epsilon. Defaults to 0.1
+            bias (float, optional): if >0, append the bias value to each instance feature. Defaults to 1.0
+            threads (int, optional): the number of threads to use for training. Defaults to -1 to use all
+            verbose (int, optional): verbose level. Defaults to 0
+
+        Return:
+            layer_train_res (smat.csc_matrix): The layer training result.
+        """
+        clib = self.clib_float32
+        coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
+        if isinstance(pX, ScipyCsrF32):
+            c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_csr_f32
+        elif isinstance(pX, ScipyDrmF32):
+            c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_drm_f32
+        else:
+            raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
+
+        c_xlinear_single_layer_fine_tune(
+            c_model,
+            byref(pX),
+            byref(pY),
+            byref(pC) if pC is not None else None,
+            byref(pM) if pM is not None else None,
+            byref(pR) if pR is not None else None,
+            coo_alloc.cfunc,
+            threshold,
+            0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
+            XLINEAR_SOLVERS[solver_type],
+            Cp,
+            Cn,
+            max_iter,
+            eps,
+            bias,
+            threads,
+        )
+        return coo_alloc.tocsc().astype(np.float32)
 
     def xlinear_predict_on_selected_outputs(
         self,
@@ -1021,6 +1136,88 @@ class corelib(object):
             raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
 
         c_xlinear_single_layer_train(
+            byref(pX),
+            byref(pY),
+            byref(pC) if pC is not None else None,
+            byref(pM) if pM is not None else None,
+            byref(pR) if pR is not None else None,
+            coo_alloc.cfunc,
+            threshold,
+            0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
+            XLINEAR_SOLVERS[solver_type],
+            Cp,
+            Cn,
+            max_iter,
+            eps,
+            bias,
+            threads,
+        )
+        return coo_alloc.tocsc().astype(np.float32)
+
+    # remem
+    def xlinear_single_layer_fine_tune(
+        self,
+        W,
+        pX,
+        pY,
+        pC,
+        pM,
+        pR,
+        threshold=0.1,
+        max_nonzeros_per_label=None,
+        solver_type="L2R_L2LOSS_SVC_DUAL",
+        Cp=1.0,
+        Cn=1.0,
+        max_iter=1000,
+        eps=0.01,
+        bias=1.0,
+        threads=-1,
+        verbose=0,
+        **kwargs,
+    ):
+        """
+        Performs a single layer training in C++ using matrices owned by Python.
+
+        Args:
+            pX (ScipyCsrF32 or ScipyDrmF32): Instance feature matrix of shape (nr_inst, nr_feat).
+            pY (ScipyCscF32): Label matrix of shape (nr_inst, nr_labels).
+            pC (ScipyCscF32): Single matrix from clustering chain, representing a hierarchical clustering.
+            pM (ScipyCsrF32): Single matrix from matching chain.
+            pR (ScipyCscF32): Relevance matrix for cost-sensitive learning, of shape (nr_inst, nr_labels).
+            threshold (float, optional): sparsify the final model by eliminating all entrees with abs value less than threshold.
+                Default to 0.1.
+            max_nonzeros_per_label (int, optional): keep at most NONZEROS weight parameters per label in model.
+                Default None to set to (nr_feat + 1)
+            solver_type (string, optional): backend linear solver type.
+                Options: L2R_L2LOSS_SVC_DUAL(default), L2R_L1LOSS_SVC_DUAL.
+            Cp (float, optional): positive penalty parameter. Defaults to 1.0
+            Cn (float, optional): negative penalty parameter. Defaults to 1.0
+            max_iter (int, optional): maximum iterations. Defaults to 100
+            eps (float, optional): epsilon. Defaults to 0.1
+            bias (float, optional): if >0, append the bias value to each instance feature. Defaults to 1.0
+            threads (int, optional): the number of threads to use for training. Defaults to -1 to use all
+            verbose (int, optional): verbose level. Defaults to 0
+
+        Return:
+            layer_train_res (smat.csc_matrix): The layer training result.
+        """
+        clib = self.clib_float32
+        coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
+        W = ScipyCscF32.init_from(W)
+        # no input of C? TODO
+        # if C is None:
+        #     C = smat.csc_matrix(np.ones((W.shape[1], 1), dtype=W.dtype))
+        # C = ScipyCscF32.init_from(C)
+
+        if isinstance(pX, ScipyCsrF32):
+            c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_csr_f32
+        elif isinstance(pX, ScipyDrmF32):
+            c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_drm_f32
+        else:
+            raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
+
+        c_xlinear_single_layer_fine_tune(
+            byref(W),
             byref(pX),
             byref(pY),
             byref(pC) if pC is not None else None,
