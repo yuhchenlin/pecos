@@ -397,13 +397,32 @@ struct SVMWorker {
         }
     }
 
-    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL) {
+    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL, size_t subcode=NULL, csc_t *W=NULL) {
         if((w_size != this->w_size)
                 || (y_size != this->y_size)
                 || ((param_ptr != NULL) && (param_ptr->solver_type != param.solver_type))) {
             init(w_size, y_size, param_ptr);
         } else {
             param = *param_ptr;
+            for(size_t i=0;i<w_size;i++){
+                w[i] = 0;
+            }
+            b = 0;
+            // printf("w size = %d\n",w_size);
+            // printf("W size = %d\n",W->rows);
+            if (W!= NULL){               
+                const auto& W_col = W->get_col(subcode);
+                for(size_t idx = 0; idx < W_col.nnz; idx++) {
+                    // printf("W: %f\n", W_col[idx]);
+                    if(W_col.idx[idx]<w_size){
+                        w[W_col.idx[idx]]=W_col.val[idx];
+                    }
+                    else{
+                        b = W_col.val[idx];
+                    }
+                    // printf("here");
+                }
+            }
         }
     }
 
@@ -427,10 +446,10 @@ struct SVMWorker {
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w);
         // re-initialize w and b
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
+        // for(size_t j = 0; j < w_size; j++) {
+        //     curr_w[j] = 0;
+        // }
+        // b = 0;
         newton_obj.newton(curr_w, b);
     }
     
@@ -682,10 +701,10 @@ struct SVMJob {
         subcode(subcode),
         param_ptr(param_ptr) { }
 
-    void init_worker(svm_worker_t& worker) const {
+    void init_worker(svm_worker_t& worker, csc_t* w=NULL) const { // w needs default NULL to accomodate multilabel_train_with_codes
         size_t w_size = feat_mat->cols;
         size_t y_size = feat_mat->rows;
-        worker.lazy_init(w_size, y_size, param_ptr); // if condition, if W, b is None, go here, else call worker.warm_start_init
+        worker.lazy_init(w_size, y_size, param_ptr, subcode, w); // if condition, if W, b is None, go here, else call worker.warm_start_init
 
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
@@ -913,19 +932,18 @@ void multilabel_fine_tune_with_codes(
     }
 
     // Check W input
-    size_t w_col_size = W->cols;
-    // printf("W col size = %d\n",w_col_size);
-    for(size_t i = 0; i < w_col_size; i++) {
-        const auto& W_col = W->get_col(i);
-        if(i%1000==0){
-            printf("W[%d][0]:%f\n",i,W_col.val[0]);    // print first non zero
-        }
-        // for(size_t idx = 0; idx < W_col.nnz; idx++) {
-        //     // printf("W: %f\n", W_col[idx]);
-        //     printf("here");
-        // }
-    }
-
+    // size_t w_col_size = W->cols;
+    // // printf("W col size = %d\n",w_col_size);
+    // for(size_t i = 0; i < w_col_size; i++) {
+    //     const auto& W_col = W->get_col(i);
+    //     if(i%1000==0){
+    //         printf("W[%d][0]:%f\n",i,W_col.val[0]);    // print first non zero
+    //     }
+    //     // for(size_t idx = 0; idx < W_col.nnz; idx++) {
+    //     //     // printf("W: %f\n", W_col[idx]);
+    //     //     printf("here");
+    //     // }
+    // }
     // printf("b = ", b);
 
     std::vector<svm_job_t> job_queue;
@@ -935,14 +953,14 @@ void multilabel_fine_tune_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param)); // can input W becuz num of W's column is the same as Y
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param)); // can input W becuz num of W's column is the same as Y
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)
@@ -951,7 +969,7 @@ void multilabel_fine_tune_with_codes(
         auto& worker = worker_set[tid];
         auto& local_model = model_set[tid];
         const auto& job = job_queue[job_id];
-        job.init_worker(worker);
+        job.init_worker(worker, W); // has subcode in job, so can get W's column there
         job.solve(worker, local_model, threshold, max_nonzeros_per_label);
         job.reset_worker(worker);
     }
