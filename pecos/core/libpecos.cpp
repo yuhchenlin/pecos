@@ -232,9 +232,11 @@ extern "C" {
         size_t max_iter, \
         double eps, \
         double bias, \
-        int threads) { \
+        int threads, \
+        ScipyCscF32 *pW) { \
         const C_MAT feat_mat(pX); \
         const pecos::csc_t Y(pY); \
+        pecos::csc_t W(pW); \
         const pecos::csc_t& C = (pC == NULL) ? pecos::csc_t() : pecos::csc_t(pC); \
         const pecos::csc_t& M = (pM == NULL) ? pecos::csc_t() : pecos::csc_t(pM); \
         const pecos::csc_t& R = (pR == NULL) ? pecos::csc_t() : pecos::csc_t(pR); \
@@ -250,7 +252,8 @@ extern "C" {
             threshold, \
             max_nonzeros_per_label, \
             &param, \
-            threads \
+            threads, \
+            &W \
         ); \
         model.create_pycoo(coo_alloc); \
     }

@@ -1157,6 +1157,7 @@ class corelib(object):
     # remem
     def xlinear_single_layer_fine_tune(
         self,
+        pW,
         pX,
         pY,
         pC,
@@ -1202,7 +1203,7 @@ class corelib(object):
         """
         clib = self.clib_float32
         coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
-        # pW = ScipyCscF32.init_from(W)
+        pW = ScipyCscF32.init_from(pW)
         # pW = ScipyCscF32.init_from(
         #     W if isinstance(W, ScipyCscF32) else W.tocsc().astype(np.float32)
         # )
@@ -1234,7 +1235,7 @@ class corelib(object):
             eps,
             bias,
             threads,
-            # byref(pW),
+            byref(pW)
         )
         return coo_alloc.tocsc().astype(np.float32)
 

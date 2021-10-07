@@ -839,7 +839,7 @@ class MLModel(pecos.BaseClass):
             train_params.eps = train_params.newton_eps
 
         model = clib.xlinear_single_layer_fine_tune(
-            # self.W, # self.bias, # TODO
+            self.W, # self.bias, # TODO
             prob.pX,
             prob.pY,
             prob.pC,
@@ -847,7 +847,7 @@ class MLModel(pecos.BaseClass):
             prob.pR,
             **train_params.to_dict(),
         )
-        return MLModel(model, prob.pC, train_params.bias, pred_params, train_params)
+        return MLModel(model, prob.pC, train_params.bias, pred_params, train_params) # !!! remem
         # if use @classmthod: return cls(model, prob.pC, train_params.bias, pred_params, train_params) # add train_params to let model contain it, order need to be the same as __init__
 
     def get_pred_params(self):
