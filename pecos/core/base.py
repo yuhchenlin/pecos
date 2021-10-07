@@ -1157,7 +1157,6 @@ class corelib(object):
     # remem
     def xlinear_single_layer_fine_tune(
         self,
-        W,
         pX,
         pY,
         pC,
@@ -1203,7 +1202,10 @@ class corelib(object):
         """
         clib = self.clib_float32
         coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
-        W = ScipyCscF32.init_from(W)
+        # pW = ScipyCscF32.init_from(W)
+        # pW = ScipyCscF32.init_from(
+        #     W if isinstance(W, ScipyCscF32) else W.tocsc().astype(np.float32)
+        # )
         # no input of C? TODO
         # if C is None:
         #     C = smat.csc_matrix(np.ones((W.shape[1], 1), dtype=W.dtype))
@@ -1217,7 +1219,6 @@ class corelib(object):
             raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
 
         c_xlinear_single_layer_fine_tune(
-            byref(W),
             byref(pX),
             byref(pY),
             byref(pC) if pC is not None else None,
@@ -1233,6 +1234,7 @@ class corelib(object):
             eps,
             bias,
             threads,
+            # byref(pW),
         )
         return coo_alloc.tocsc().astype(np.float32)
 

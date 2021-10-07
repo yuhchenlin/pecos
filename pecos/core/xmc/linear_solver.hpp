@@ -891,7 +891,8 @@ void multilabel_fine_tune_with_codes(
     double threshold,
     uint32_t max_nonzeros_per_label,
     SVMParameter *param,
-    int threads
+    int threads //,
+    // csc_t *W
 ) {
     typedef typename MAT::value_type value_type;
     typedef SVMJob<MAT, value_type> svm_job_t;
@@ -909,6 +910,32 @@ void multilabel_fine_tune_with_codes(
     for(int tid = 0; tid < threads; tid++) {
         worker_set[tid].init(w_size, y_size, param);
         model_set[tid].reshape(w_size + (param->bias > 0), nr_labels);
+    }
+
+    // for (int i=0; i < w_size; i++){printf("W: %f\n", W[i]);}
+    // Last w
+    // size_t w_col_size = W->cols;
+    // printf("W col size = %d\n",w_col_size); // good, W col size = 186104, Segmentation fault
+
+    // for(size_t i = 0; i < w_col_size; i++) {
+    //     const auto& W_col = W->get_col(i);
+    //     if(i%10000==0){
+    //         printf("W[%d][0]:\n",i);    
+    //     }
+    //     // for(size_t idx = 0; idx < W_col.nnz; idx++) {
+    //     //     // printf("W: %f\n", W_col[idx]);
+    //     //     printf("here");
+    //     // }
+    // }
+
+    // printf("b = ", b);
+    size_t code_size = C->cols;
+    for(size_t code = 0; code < code_size; code++) {
+        const auto& C_code = C->get_col(code);
+        for(size_t idx = 0; idx < C_code.nnz; idx++) {
+            size_t subcode = static_cast<size_t>(C_code.idx[idx]);
+            printf("subcode%d \n", subcode);
+        }
     }
 
     std::vector<svm_job_t> job_queue;

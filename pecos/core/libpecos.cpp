@@ -218,7 +218,6 @@ extern "C" {
 
     #define C_XLINEAR_SINGLE_LAYER_FINE_TUNE(SUFFIX, PY_MAT, C_MAT) \
     void c_xlinear_single_layer_fine_tune ## SUFFIX( \
-        ScipyCscF32* W, \
         const PY_MAT *pX, \
         const ScipyCscF32 *pY, \
         const ScipyCscF32 *pC, \
@@ -234,7 +233,6 @@ extern "C" {
         double eps, \
         double bias, \
         int threads) { \
-        pecos::csc_t W_ = pecos::csc_t(W); \
         const C_MAT feat_mat(pX); \
         const pecos::csc_t Y(pY); \
         const pecos::csc_t& C = (pC == NULL) ? pecos::csc_t() : pecos::csc_t(pC); \
@@ -242,7 +240,7 @@ extern "C" {
         const pecos::csc_t& R = (pR == NULL) ? pecos::csc_t() : pecos::csc_t(pR); \
         pecos::linear_solver::SVMParameter param(solver_type, Cp, Cn, max_iter, eps, bias); \
         pecos::coo_t model; \
-        pecos::linear_solver::multilabel_train_with_codes(\
+        pecos::linear_solver::multilabel_fine_tune_with_codes(\
             &feat_mat, \
             &Y, \
             (pC == NULL) ? NULL : &C, \
