@@ -402,32 +402,41 @@ struct SVMWorker {
                 || (y_size != this->y_size)
                 || ((param_ptr != NULL) && (param_ptr->solver_type != param.solver_type))) {
             init(w_size, y_size, param_ptr);
-        } else {
+        } 
+        else {
             param = *param_ptr;
-            for(size_t i=0;i<w_size;i++){
+            // re-initialize w and b
+            // for (size_t i=0;i < w_size;i++) {
+            for (auto& i : index){
                 w[i] = 0;
             }
-            b = 0;
+            b = 0;          
             // printf("w size = %d\n",w_size);
             // printf("W size = %d\n",W->rows);
-            if (W!= NULL){               
+            if (W!= NULL) {               
                 const auto& W_col = W->get_col(subcode);
-                for(size_t idx = 0; idx < W_col.nnz; idx++) {
+                for (size_t idx = 0; idx < W_col.nnz; idx++) {
                     // printf("W: %f\n", W_col[idx]);
-                    if(W_col.idx[idx]<w_size){
-                        w[W_col.idx[idx]]=W_col.val[idx];
+                    if (W_col.idx[idx] < w_size) {
+                        w[W_col.idx[idx]] = W_col.val[idx];
                     }
-                    else{
+                    else {
                         b = W_col.val[idx];
                     }
-                    // printf("here");
                 }
             }
+            // Print 1st w
+            // printf("fine_tune 1st w:\n");
+            // for (size_t i=0;i < w_size;i++) {
+            // // for (auto& i : index) {
+            //     printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
+            // }
+            // printf("b = ", b);
         }
     }
 
-    template<typename MAT>
-    void solve(const MAT& X, int seed=0) {
+    template<typename MAT> // take subcode for printing it (to know the order of w)
+    void solve(const MAT& X, int seed=0, size_t subcode=NULL) {
         // the solution will be available in w and b
         if(param.solver_type == L2R_L1LOSS_SVC_DUAL) {
             solve_l2r_l1l2_svc(X, seed);
@@ -436,28 +445,33 @@ struct SVMWorker {
         } else if(param.solver_type == L2R_LR_DUAL) {
             solve_l2r_lr(X, seed);
         } else if (param.solver_type == L2R_L2LOSS_SVC_PRIMAL) {
-            solve_l2r_l2_svc_primal(X, seed);
+            solve_l2r_l2_svc_primal(X, seed, subcode); // take subcode for printing it (to know the order of w)
         }
     }
 
-    template <typename MAT>
-    void solve_l2r_l2_svc_primal(const MAT &X, int seed) {
+    template <typename MAT> // take subcode for printing it (to know the order of w)
+    void solve_l2r_l2_svc_primal(const MAT &X, int seed, size_t subcode=NULL) {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w);
-        // re-initialize w and b
+        // re-initialize w and b // TODO for dual
         // for(size_t j = 0; j < w_size; j++) {
         //     curr_w[j] = 0;
         // }
         // b = 0;
         newton_obj.newton(curr_w, b);
+        // Last w
+        // for (uint64_t i = 0; i < w_size; i++) {
+        //     printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
+        // }
+        // printf("b = ", b);
     }
     
     template<typename MAT>
     void solve_l2r_l1l2_svc(const MAT& X, int seed) {
         dvec_wrapper_t curr_w(w);
         rng_t rng(seed);
-
+        // TODO
         for(size_t j = 0; j < w_size; j++) {
             curr_w[j] = 0;
         }
@@ -753,7 +767,8 @@ struct SVMJob {
      * Store *max_nonzeros* parameters with the absolute value >= *threshold* into  *coo_model*
      * */
     void solve(svm_worker_t& worker, coo_t& coo_model, double threshold=0.0, uint32_t max_nonzeros=0) const {
-        worker.solve(*feat_mat);
+        // printf("job subcode%d: ", subcode); // TODO
+        worker.solve(*feat_mat, 0, subcode); // put seed s 0, take subcode for printing it (to know the order of w)
         if(max_nonzeros == 0) {
             for(size_t i = 0; i < worker.w_size; i++) {
                 coo_model.push_back(i, subcode, worker.w[i], threshold);
@@ -953,7 +968,7 @@ void multilabel_fine_tune_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param)); // can input W becuz num of W's column is the same as Y
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param)); // can input W becuz num of W's column is the same as Y, but SVMJob has subcode, so no need to pass W, but use subcode to get W
             }
         }
     } else {

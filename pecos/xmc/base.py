@@ -577,7 +577,7 @@ class MLModel(pecos.BaseClass):
             verbose (int, optional): verbose level. Defaults to 0
         """
 
-        threshold: float = 0.1
+        threshold: float = 0.1 # remem: change to 0 to test/verify if w is correct for train and fine_tune
         max_nonzeros_per_label: int = None  # type: ignore
         solver_type: str = "L2R_L2LOSS_SVC_DUAL"
         Cp: float = 1.0
@@ -718,6 +718,7 @@ class MLModel(pecos.BaseClass):
         C = smat_util.load_matrix("{}/C.npz".format(folder)).tocsc().sorted_indices()
         pred_params = cls.PredParams.from_dict(param["pred_kwargs"])
         train_params = cls.TrainParams.from_dict(param["train_kwargs"])
+        # print("W after loaded trained model...", W)
         return cls(W, C, param["bias"], pred_params, train_params)
 
     @classmethod
@@ -1577,14 +1578,15 @@ class HierarchicalMLModel(pecos.BaseClass):
                     pred_params, cls.PredParams, depth
                 )
             pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-            # TODO
-            ml_model = MLModel.train(
+            # TODO: verify
+            mlmodel = MLModel(self.W, self.C, self.bias, pred_params, train_params) # TODO
+            cur_ml_model = mlmodel.fine_tune(
                 prob,
                 train_params=train_params.model_chain[0],
                 pred_params=pred_params.model_chain[0],
             )
             # TODO
-            return HierarchicalMLModel([ml_model], pred_params=pred_params, is_predict_only=False)
+            return HierarchicalMLModel([cur_ml_model], pred_params=pred_params, train_params=train_params, is_predict_only=False, is_warm_start=False)
 
         # assert cluster chain in clustering is valid
         clustering = ClusterChain(clustering)
@@ -1671,22 +1673,11 @@ class HierarchicalMLModel(pecos.BaseClass):
                     M += smat_util.binarized(M_pred)
                 cur_prob = MLProblem(cur_prob.pX, Y, C=C, M=M, threads=matmul_threads)
             # remem: use MLModel.fine_tune to replace MLModel.train
-            # mlmodel = MLModel(self.W, self.C, self.bias, cur_pred_params, cur_train_params) # TODO
-            # cur_model = mlmodel.fine_tune(
-            #     cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
-            # )
-
-            # imitate def predict
-            # cur_model = clib.xlinear_fine_tune(
-            # self.model_chain,
-            # cur_prob.pX,
-            # cur_prob.pY,
-            # cur_prob.pC,
-            # cur_prob.pM,
-            # cur_prob.pR,
-            # **cur_train_params.to_dict(),
-            # )
-
+            mlmodel = MLModel(self.W, self.C, self.bias, cur_pred_params, cur_train_params) # TODO
+            cur_model = mlmodel.fine_tune(
+                cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
+            )
+            return HierarchicalMLModel([cur_model], pred_params=pred_params, train_params=train_params, is_predict_only=False, is_warm_start=False)            
             # model_chain.append(cur_model)
         # if use @classmthod: return cls(model_chain, pred_params=pred_params, is_predict_only=False)
     

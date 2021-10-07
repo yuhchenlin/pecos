@@ -1206,8 +1206,8 @@ class corelib(object):
         pW = ScipyCscF32.init_from(pW)
         # pW = ScipyCscF32.init_from(
         #     W if isinstance(W, ScipyCscF32) else W.tocsc().astype(np.float32)
-        # )
-        # no input of C? TODO
+        # ) 
+        # no input of C
         # if C is None:
         #     C = smat.csc_matrix(np.ones((W.shape[1], 1), dtype=W.dtype))
         # C = ScipyCscF32.init_from(C)

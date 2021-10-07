@@ -121,8 +121,9 @@ namespace pecos {
             f = fun_obj->fun(w, b);
             fun_obj->grad(w, g, b, bg);
             double gnorm = norm(g, w_size, bg);
-            printf("gnorm = %f, gnorm0 = %f, b = %f\n",gnorm,gnorm0,b);
+            // printf("gnorm = %f, gnorm0 = %f, b = %f\n",gnorm,gnorm0,b);
             if (gnorm <= eps * gnorm0) {
+                // printf("Stopping condition met");
                 search = 0;
             }
 
@@ -145,7 +146,7 @@ namespace pecos {
                 fun_obj->grad(w, g, b, bg);
                 gnorm = norm(g, w_size, bg);
                 if (gnorm <= eps * gnorm0) {
-                    printf("last iter = %d,gnorm = %f,gnorm0 = %f, b = %f\n",iter,gnorm,gnorm0,b);
+                    // printf("last iter = %d,gnorm = %f,gnorm0 = %f, b = %f\n",iter,gnorm,gnorm0,b);
                     break;
                 }
                 if (f < -1.0e+32) {
