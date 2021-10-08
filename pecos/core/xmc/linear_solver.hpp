@@ -406,8 +406,7 @@ struct SVMWorker {
         else {
             param = *param_ptr;
             // re-initialize w and b
-            // for (size_t i=0;i < w_size;i++) {
-            for (auto& i : index){
+            for (size_t i=0;i < w_size;i++) {
                 w[i] = 0;
             }
             b = 0;          
