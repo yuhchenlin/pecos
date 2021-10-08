@@ -766,7 +766,6 @@ struct SVMJob {
      * Store *max_nonzeros* parameters with the absolute value >= *threshold* into  *coo_model*
      * */
     void solve(svm_worker_t& worker, coo_t& coo_model, double threshold=0.0, uint32_t max_nonzeros=0) const {
-        // printf("job subcode%d: ", subcode); // TODO
         worker.solve(*feat_mat, 0, subcode); // put seed s 0, take subcode for printing it (to know the order of w)
         if(max_nonzeros == 0) {
             for(size_t i = 0; i < worker.w_size; i++) {
