@@ -577,7 +577,7 @@ class MLModel(pecos.BaseClass):
             verbose (int, optional): verbose level. Defaults to 0
         """
 
-        threshold: float = 0.1 # remem: change to 0 to test/verify if w is correct for train and fine_tune
+        threshold: float = 0 # TODO: change back to 0.1, remem: change to 0 to test/verify if w is correct for train and fine_tune
         max_nonzeros_per_label: int = None  # type: ignore
         solver_type: str = "L2R_L2LOSS_SVC_DUAL"
         Cp: float = 1.0
@@ -1320,17 +1320,16 @@ class HierarchicalMLModel(pecos.BaseClass):
         depth = int(param.get("depth", len(glob("{}/*.model".format(model_folder)))))
 
         # remem: TODO
-        if is_warm_start:
-            model = clib.xlinear_load_warm_start(model_folder, **kwargs) # TODO
+        # if is_warm_start:
+        #     model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
+        #     # model = clib.xlinear_load_warm_start(model_folder, **kwargs)
+        #     print("2 HierarchicalMLModel load, return cls(model, pred_params, is_predict_only, is_warm_start, train_params)")
+            
+        if is_predict_only:
+            # print("here") # 1 layer model only
+            model = clib.xlinear_load_predict_only(model_folder, **kwargs)
         else:
-            # model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
-
-            if is_predict_only:
-                # print("here")
-                print("2 HierarchicalMLModel load, return cls(model, pred_params, is_predict_only, is_warm_start, train_params)")
-                model = clib.xlinear_load_predict_only(model_folder, **kwargs)
-            else:
-                model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
+            model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
 
         pred_params = cls.PredParams(
             model_chain=[
@@ -1567,7 +1566,7 @@ class HierarchicalMLModel(pecos.BaseClass):
             else:
                 train_params = self.TrainParams.from_dict(train_params)
                 train_params = self._duplicate_fields_with_name_ending_with_chain(
-                    train_params, cls.TrainParams, depth
+                    train_params, self.TrainParams, depth
                 )
 
             if pred_params is None:
@@ -1575,28 +1574,25 @@ class HierarchicalMLModel(pecos.BaseClass):
             else:
                 pred_params = self.PredParams.from_dict(pred_params)
                 pred_params = self._duplicate_fields_with_name_ending_with_chain(
-                    pred_params, cls.PredParams, depth
+                    pred_params, self.PredParams, depth
                 )
             pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-            # TODO: verify
-            mlmodel = MLModel(self.W, self.C, self.bias, pred_params, train_params) # TODO
+            # TODO: verify       
+            mlmodel = self.model_chain[0]
             cur_ml_model = mlmodel.fine_tune(
                 prob,
                 train_params=train_params.model_chain[0],
                 pred_params=pred_params.model_chain[0],
-            )
-            # TODO
+            ) 
+            # print("here")
             return HierarchicalMLModel([cur_ml_model], pred_params=pred_params, train_params=train_params, is_predict_only=False, is_warm_start=False)
 
         # assert cluster chain in clustering is valid
         clustering = ClusterChain(clustering)
         assert clustering[-1].shape[0] == prob.nr_labels
         depth = len(clustering)
-        # construct train_params
-        # if train_params is None:  # for backward compatibility
-        #     train_params = kwargs
-        # train_params = self.TrainParams.from_dict(train_params)
 
+        # construct train_params
         if train_params is None:  # for backward compatibility
             train_params = self.TrainParams(
                 neg_mining_chain=tuple(
@@ -1634,7 +1630,7 @@ class HierarchicalMLModel(pecos.BaseClass):
             Y_t = clib.sparse_matmul(Y_chain[-1], C, threads=matmul_threads).tocsc()
             Y_chain.append(Y_t)
         Y_chain.reverse()
-
+        
         cur_prob, M_pred = prob, None
         model_chain = []
         for t, (Y, C, M_usn) in enumerate(zip(Y_chain, clustering, matching_chain)):
@@ -1673,12 +1669,20 @@ class HierarchicalMLModel(pecos.BaseClass):
                     M += smat_util.binarized(M_pred)
                 cur_prob = MLProblem(cur_prob.pX, Y, C=C, M=M, threads=matmul_threads)
             # remem: use MLModel.fine_tune to replace MLModel.train
-            mlmodel = MLModel(self.W, self.C, self.bias, cur_pred_params, cur_train_params) # TODO
+            # mlmodel = MLModel(self.W, self.C, self.bias, cur_pred_params, cur_train_params)
+            # cur_model = mlmodel.fine_tune(
+            #     cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
+            # )
+            mlmodel = self.model_chain[t]
+            # print('fine tuning the ',t,' layer')
             cur_model = mlmodel.fine_tune(
-                cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
-            )
-            return HierarchicalMLModel([cur_model], pred_params=pred_params, train_params=train_params, is_predict_only=False, is_warm_start=False)            
-            # model_chain.append(cur_model)
+                cur_prob,
+                train_params=cur_train_params,
+                pred_params=cur_pred_params,
+            ) 
+            # print("HierarchicalMLModel.fine_tune")
+            model_chain.append(cur_model)
+        return HierarchicalMLModel(model_chain, pred_params=pred_params, train_params=train_params, is_predict_only=False, is_warm_start=False)            
         # if use @classmthod: return cls(model_chain, pred_params=pred_params, is_predict_only=False)
     
     def get_pred_params(self):
@@ -1729,6 +1733,7 @@ class HierarchicalMLModel(pecos.BaseClass):
         pred_params.override_with_kwargs(kwargs)
 
         if self.is_predict_only:
+            print("is_predict_only")
             if csr_codes is not None:
                 raise NotImplementedError(
                     "is_predict_only=True did not support csr_codes being not None"
@@ -1777,6 +1782,7 @@ class HierarchicalMLModel(pecos.BaseClass):
 
             return pred_alloc.get()
         else:
+            print("is not predict only")
             pred_csr = csr_codes
             for d in range(self.depth):
                 cur_model = self.model_chain[d]

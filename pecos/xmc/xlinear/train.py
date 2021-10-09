@@ -203,7 +203,7 @@ def parse_arguments():
         "-t",
         "--threshold",
         type=float,
-        default=0.1,
+        default=0, # TODO: change back to 0.1, remem: change to 0 to test/verify if w is correct for train and fine_tune
         metavar="VAL",
         help="threshold to sparsify the model weights (default 0.1)",
     )
@@ -283,16 +283,17 @@ def do_train(args):
 
         cluster_chain = Indexer.gen(
             label_feat,
-            args.indexer,
-            nr_splits=args.nr_splits,
-            max_leaf_size=args.max_leaf_size,
-            imbalanced_depth=args.imbalanced_depth,
-            imbalanced_ratio=args.imbalanced_ratio,
-            seed=args.seed,
-            max_iter=args.max_iter,
-            threads=args.threads,
-            spherical=not args.no_spherical,
+            # args.indexer,
+            # nr_splits=args.nr_splits,
+            # max_leaf_size=args.max_leaf_size,
+            # imbalanced_depth=args.imbalanced_depth,
+            # imbalanced_ratio=args.imbalanced_ratio,
+            # seed=args.seed,
+            # max_iter=args.max_iter,
+            # threads=args.threads,
+            # spherical=not args.no_spherical,
         )
+        # print("cluster_chain")
 
     # load label importance matrix if given
     if args.usn_label_path:
@@ -316,24 +317,26 @@ def do_train(args):
     # if cluster change (situation will be complicated) -> make the clusters fix first 
     if args.model_path_warm_start:
         xlinear_model = XLinearModel.load(
-            args.model_path_warm_start, is_predict_only=False, is_warm_start=True
+            args.model_path_warm_start
         ) # TODO weight_matrix_type no need? look at predict.py
-    # print(args.model_path_warm_start) # - done
+        # print(args.model_path_warm_start) # - done
+        print(usn_match_dict, args.negative_sampling, pred_kwargs, args.nr_splits, args.threads,args.Cp,args.Cn,args.bias,args.threshold,args.max_nonzeros_per_label)
+        # {0: None, 1: None} tfn {'beam_size': 10, 'only_topk': 20, 'post_processor': 'l3-hinge'} 2 -1 1.0 1.0 1.0 0.1 0
         xlm = xlinear_model.fine_tune(
             X,
             Y,
             cluster_chain,
-            user_supplied_negatives=usn_match_dict,
-            negative_sampling_scheme=args.negative_sampling,
-            pred_kwargs=pred_kwargs,
-            nr_splits=args.nr_splits,
-            threads=args.threads,
+            # user_supplied_negatives=usn_match_dict,
+            # negative_sampling_scheme=args.negative_sampling,
+            # pred_kwargs=pred_kwargs,
+            # nr_splits=args.nr_splits,
+            # threads=args.threads,
             solver_type=args.solver_type,
-            Cp=args.Cp,
-            Cn=args.Cn,
-            bias=args.bias,
-            threshold=args.threshold,
-            max_nonzeros_per_label=args.max_nonzeros_per_label,
+            # Cp=args.Cp,
+            # Cn=args.Cn,
+            # bias=args.bias,
+            # threshold=args.threshold,
+            # max_nonzeros_per_label=args.max_nonzeros_per_label,
         )
         # print("done")
     else:
@@ -341,20 +344,20 @@ def do_train(args):
             X,
             Y,
             cluster_chain,
-            user_supplied_negatives=usn_match_dict,
-            negative_sampling_scheme=args.negative_sampling,
-            pred_kwargs=pred_kwargs,
-            nr_splits=args.nr_splits,
-            threads=args.threads,
+            # user_supplied_negatives=usn_match_dict,
+            # negative_sampling_scheme=args.negative_sampling,
+            # pred_kwargs=pred_kwargs,
+            # nr_splits=args.nr_splits,
+            # threads=args.threads,
             solver_type=args.solver_type,
-            Cp=args.Cp,
-            Cn=args.Cn,
-            bias=args.bias,
-            threshold=args.threshold,
-            max_nonzeros_per_label=args.max_nonzeros_per_label,
+            # Cp=args.Cp,
+            # Cn=args.Cn,
+            # bias=args.bias,
+            # threshold=args.threshold,
+            # max_nonzeros_per_label=args.max_nonzeros_per_label,
         )
 
-    # xlm.save(args.model_folder) # TODO: uncomment this after having xlm object
+    xlm.save(args.model_folder)
     # print("done")
 
 

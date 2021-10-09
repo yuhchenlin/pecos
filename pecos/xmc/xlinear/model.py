@@ -260,7 +260,6 @@ class XLinearModel(pecos.BaseClass):
         Returns:
             XLinearModel: the trained XLinearModel
         """
-
         if train_params is None:  # for backward compatibility
             train_params = self.TrainParams.from_dict(kwargs)
             train_params.hlm_args = HierarchicalMLModel.TrainParams(
@@ -308,10 +307,9 @@ class XLinearModel(pecos.BaseClass):
             matching_chain = matching_chain[-train_params.ranker_level :]
         else:
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
-
+        print(train_params)
         prob = MLProblem(X, Y)
         # remem: use self.model.fine_tune() to replace HierarchicalMLModel.train
-        # hierarchical_mlmodel = HierarchicalMLModel()
         model = self.model.fine_tune(
             prob,
             clustering=clustering,
@@ -320,6 +318,7 @@ class XLinearModel(pecos.BaseClass):
             pred_params=pred_params.hlm_args,
             **kwargs,
         )
+        return XLinearModel(model)
         # if use @classmthod: return cls(model)
 
     def set_output_constraint(self, labels_to_keep):
