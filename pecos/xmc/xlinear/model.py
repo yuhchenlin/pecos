@@ -95,7 +95,7 @@ class XLinearModel(pecos.BaseClass):
         self.model.save(path.join(model_folder, "ranker"))
 
     @classmethod
-    def load(cls, model_folder, is_predict_only=False, is_warm_start=False, **kwargs):
+    def load(cls, model_folder, is_predict_only=False, **kwargs):
         """Load the XLinear model from file
 
         Args:
@@ -120,9 +120,9 @@ class XLinearModel(pecos.BaseClass):
         Returns:
             XLinearModel
         """
-        print("1 XLinearModel, return cls(model)")
+        # print("1 XLinearModel, return cls(model)")
         model = HierarchicalMLModel.load(
-            path.join(model_folder, "ranker"), is_predict_only, is_warm_start, **kwargs
+            path.join(model_folder, "ranker"), is_predict_only, **kwargs
         )
         return cls(model)
 
@@ -307,7 +307,8 @@ class XLinearModel(pecos.BaseClass):
             matching_chain = matching_chain[-train_params.ranker_level :]
         else:
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
-        print(train_params)
+        # print(train_params)
+        # XLinearModel.TrainParams(mode='full-model', ranker_level=1, nr_splits=2, min_codes=2, shallow=False, hlm_args=HierarchicalMLModel.TrainParams(neg_mining_chain='tfn', model_chain=MLModel.TrainParams(threshold=0, max_nonzeros_per_label=None, solver_type='L2R_L2LOSS_SVC_PRIMAL', Cp=1.0, Cn=1.0, max_iter=100, eps=0.1, bias=1.0, threads=-1, verbose=0, newton_eps=0.01)))
         prob = MLProblem(X, Y)
         # remem: use self.model.fine_tune() to replace HierarchicalMLModel.train
         model = self.model.fine_tune(
