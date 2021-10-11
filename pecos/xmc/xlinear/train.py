@@ -318,7 +318,7 @@ def do_train(args):
     if args.model_path_warm_start:
         xlinear_model = XLinearModel.load(
             args.model_path_warm_start
-        ) # TODO weight_matrix_type no need? look at predict.py
+        )
         # print(args.model_path_warm_start) # - done
         print(usn_match_dict, args.negative_sampling, pred_kwargs, args.nr_splits, args.threads,args.Cp,args.Cn,args.bias,args.threshold,args.max_nonzeros_per_label)
         # {0: None, 1: None} tfn {'beam_size': 10, 'only_topk': 20, 'post_processor': 'l3-hinge'} 2 -1 1.0 1.0 1.0 0.1 0

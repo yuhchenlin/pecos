@@ -121,9 +121,9 @@ namespace pecos {
             f = fun_obj->fun(w, b);
             fun_obj->grad(w, g, b, bg);
             double gnorm = norm(g, w_size, bg);
-            printf("START: gnorm = %f, gnorm0 = %f, b = %f\n",gnorm,gnorm0,b);
+            // printf("START: gnorm = %f, gnorm0 = %f, b = %f\n",gnorm,gnorm0,b);
             if (gnorm <= eps * gnorm0) {
-                printf("Stopping condition met\n");
+                // printf("Stopping condition met\n");
                 search = 0;
             }
 

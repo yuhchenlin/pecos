@@ -1317,13 +1317,7 @@ class HierarchicalMLModel(pecos.BaseClass):
         param = json.loads(open(f"{model_folder}/param.json", "r", encoding="utf-8").read())
         assert param["model"] == cls.__name__
         depth = int(param.get("depth", len(glob("{}/*.model".format(model_folder)))))
-
-        # remem: TODO
-        # if is_warm_start:
-        #     model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
-        #     # model = clib.xlinear_load_warm_start(model_folder, **kwargs)
-        #     print("2 HierarchicalMLModel load, return cls(model, pred_params, is_predict_only, is_warm_start, train_params)")
-            
+        
         if is_predict_only:
             # print("here") # 1 layer model only
             model = clib.xlinear_load_predict_only(model_folder, **kwargs)
