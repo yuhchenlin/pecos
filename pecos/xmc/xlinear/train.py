@@ -282,15 +282,15 @@ def do_train(args):
 
         cluster_chain = Indexer.gen(
             label_feat,
-            # args.indexer,
-            # nr_splits=args.nr_splits,
-            # max_leaf_size=args.max_leaf_size,
-            # imbalanced_depth=args.imbalanced_depth,
-            # imbalanced_ratio=args.imbalanced_ratio,
-            # seed=args.seed,
-            # max_iter=args.max_iter,
-            # threads=args.threads,
-            # spherical=not args.no_spherical,
+            args.indexer,
+            nr_splits=args.nr_splits,
+            max_leaf_size=args.max_leaf_size,
+            imbalanced_depth=args.imbalanced_depth,
+            imbalanced_ratio=args.imbalanced_ratio,
+            seed=args.seed,
+            max_iter=args.max_iter,
+            threads=args.threads,
+            spherical=not args.no_spherical,
         )
 
     # load label importance matrix if given
@@ -311,20 +311,21 @@ def do_train(args):
             pred_kwargs[kw] = getattr(args, kw)
 
     if args.init_model_dir:
-        # TODO: need to check X, Y dimension, clustering
+        # TODO: need to check X, Y dimension, solver_type
         xlinear_model = XLinearModel.load(
             args.init_model_dir
         )
+        # no cluster_chain newly given for fine_tune but use existed one
         xlm = xlinear_model.fine_tune(
             X,
             Y,
-            cluster_chain, # TODO, delete cluster_chain from outside
+            # # cluster_chain, # TODO, delete cluster_chain from outside
             # user_supplied_negatives=usn_match_dict,
             # negative_sampling_scheme=args.negative_sampling,
             # pred_kwargs=pred_kwargs,
             # nr_splits=args.nr_splits, # TODO, delete cluster_chain from outside => becuz control clustering
             # threads=args.threads,
-            solver_type=args.solver_type, # TODO, delete, becuz only can use primal
+            # # solver_type=args.solver_type, # TODO, delete, becuz only can use primal
             # Cp=args.Cp,
             # Cn=args.Cn,
             # bias=args.bias,

@@ -218,7 +218,6 @@ class XLinearModel(pecos.BaseClass):
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
 
         prob = MLProblem(X, Y)
-
         model = HierarchicalMLModel.train(
             prob,
             clustering=clustering,
@@ -233,7 +232,6 @@ class XLinearModel(pecos.BaseClass):
         self,
         X,
         Y,
-        C=None,
         user_supplied_negatives=None,
         train_params=None,
         pred_params=None,
@@ -244,8 +242,6 @@ class XLinearModel(pecos.BaseClass):
         Args:
             X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
             Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
-            C (csc_matrix(float32), list/tuple of csc_matrices or ClusterChain, optional): indexer matrix or cluster chain.
-                Defaults to None
             user_supplied_negatives (dict, optional): dictionary of usn matching matrices.
                 See ClusterChain.generate_matching_chain. Defaults to None.
             train_params (XLinearModel.TrainParams, optional): instance of XLinearModel.TrainParams
@@ -276,41 +272,16 @@ class XLinearModel(pecos.BaseClass):
         if not train_params.min_codes:
             train_params.min_codes = train_params.nr_splits
 
-        if C is None or (isinstance(C, (list, tuple)) and len(C) == 0):
-            clustering = None
-            matching_chain = None
-        else:
-            if train_params.shallow:
-                clustering = ClusterChain.from_partial_chain(C, min_codes=None)
-            else:
-                clustering = ClusterChain.from_partial_chain(
-                    C, min_codes=train_params.min_codes, nr_splits=train_params.nr_splits
-                )
-            matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
-        # TODO: only support full-model
+        # Fine tune nly supports full-model
         if train_params.mode == "full-model":
             pass
-        # train till X layer
-        elif train_params.mode == "matcher":
-            if clustering is None:
-                raise ValueError("Expect non-trivial clustering for matcher mode")
-            for cc in reversed(clustering[-train_params.ranker_level :]):
-                Y = Y.dot(cc).tocsc()
-            clustering = ClusterChain(clustering[: -train_params.ranker_level])
-            matching_chain = matching_chain[: -train_params.ranker_level]
-        elif train_params.mode == "ranker": # train from X layer
-            if clustering is None:
-                raise ValueError("Expect non-trivial clustering for ranker mode")
-            clustering = ClusterChain(clustering[-train_params.ranker_level :])
-            matching_chain = matching_chain[-train_params.ranker_level :]
         else:
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
 
         prob = MLProblem(X, Y)
         model = self.model.fine_tune(
             prob,
-            clustering=clustering, # TODO
-            matching_chain=matching_chain, # TODO
+            user_supplied_negatives=user_supplied_negatives,
             train_params=train_params.hlm_args,
             pred_params=pred_params.hlm_args,
             **kwargs,

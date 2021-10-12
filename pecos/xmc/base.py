@@ -826,7 +826,7 @@ class MLModel(pecos.BaseClass):
             self.W,
             prob.pX,
             prob.pY,
-            prob.pC, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
+            self.C, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
             # 10 C -> 1 cluster chain, take out C, so that M wil be easier to get
             prob.pM,
             prob.pR,
@@ -1483,8 +1483,7 @@ class HierarchicalMLModel(pecos.BaseClass):
     def fine_tune(
         self,
         prob,
-        clustering=None,
-        matching_chain=None,
+        user_supplied_negatives=None,
         train_params=None,
         pred_params=None,
         **kwargs,
@@ -1513,37 +1512,10 @@ class HierarchicalMLModel(pecos.BaseClass):
                 "Cost-senstive learning for HierarchicalMLModel is not yet supported"
             )
 
-        if clustering is None or clustering is False:
-            depth = 1
-            if train_params is None:
-                train_params = self.TrainParams(
-                    model_chain=tuple([MLModel.TrainParams.from_dict(kwargs)])
-                )
-            else:
-                train_params = self.TrainParams.from_dict(train_params)
-                train_params = self._duplicate_fields_with_name_ending_with_chain(
-                    train_params, self.TrainParams, depth
-                )
-
-            if pred_params is None:
-                pred_params = self.PredParams(model_chain=tuple([MLModel.PredParams()]))
-            else:
-                pred_params = self.PredParams.from_dict(pred_params)
-                pred_params = self._duplicate_fields_with_name_ending_with_chain(
-                    pred_params, self.PredParams, depth
-                )
-            pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-                  
-            mlmodel = self.model_chain[0]
-            cur_ml_model = mlmodel.fine_tune(
-                prob,
-                train_params=train_params.model_chain[0],
-                pred_params=pred_params.model_chain[0],
-            )
-            return HierarchicalMLModel([cur_ml_model], pred_params=pred_params, train_params=train_params, is_predict_only=False)
-
+        clustering = [mlmodel.C for mlmodel in self.model_chain]
         # assert cluster chain in clustering is valid
         clustering = ClusterChain(clustering) # a list of all C
+        matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
         assert clustering[-1].shape[0] == prob.nr_labels
         depth = len(clustering)
         # take out clustering, produce a cluster chain, use ClusterChain()

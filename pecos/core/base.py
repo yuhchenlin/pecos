@@ -1210,7 +1210,7 @@ class corelib(object):
         # no input of C
         # if C is None:
         #     C = smat.csc_matrix(np.ones((W.shape[1], 1), dtype=W.dtype))
-        # C = ScipyCscF32.init_from(C)
+        pC = ScipyCscF32.init_from(pC)
 
         if isinstance(pX, ScipyCsrF32):
             c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_csr_f32
