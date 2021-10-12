@@ -120,7 +120,6 @@ class XLinearModel(pecos.BaseClass):
         Returns:
             XLinearModel
         """
-        # print("1 XLinearModel, return cls(model)")
         model = HierarchicalMLModel.load(
             path.join(model_folder, "ranker"), is_predict_only, **kwargs
         )
@@ -182,7 +181,6 @@ class XLinearModel(pecos.BaseClass):
         if pred_params is None:
             pred_params = cls.PredParams()
             pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
-            # print(pred_params) # XLinearModel.PredParams(hlm_args=HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams(only_topk=20, post_processor='l3-hinge')))
         else:
             pred_params = cls.PredParams.from_dict(pred_params)
         # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
@@ -231,7 +229,6 @@ class XLinearModel(pecos.BaseClass):
         )
         return cls(model)
 
-    # remem
     def fine_tune(
         self,
         X,
@@ -307,10 +304,8 @@ class XLinearModel(pecos.BaseClass):
             matching_chain = matching_chain[-train_params.ranker_level :]
         else:
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
-        # print(train_params)
-        # XLinearModel.TrainParams(mode='full-model', ranker_level=1, nr_splits=2, min_codes=2, shallow=False, hlm_args=HierarchicalMLModel.TrainParams(neg_mining_chain='tfn', model_chain=MLModel.TrainParams(threshold=0, max_nonzeros_per_label=None, solver_type='L2R_L2LOSS_SVC_PRIMAL', Cp=1.0, Cn=1.0, max_iter=100, eps=0.1, bias=1.0, threads=-1, verbose=0, newton_eps=0.01)))
+
         prob = MLProblem(X, Y)
-        # remem: use self.model.fine_tune() to replace HierarchicalMLModel.train
         model = self.model.fine_tune(
             prob,
             clustering=clustering,
@@ -320,7 +315,6 @@ class XLinearModel(pecos.BaseClass):
             **kwargs,
         )
         return XLinearModel(model)
-        # if use @classmthod: return cls(model)
 
     def set_output_constraint(self, labels_to_keep):
         """
@@ -558,7 +552,6 @@ class XLinearModel(pecos.BaseClass):
                     pred_params=None if pred_params is None else pred_params.hlm_args,
                     **kwargs,
                 )
-                print("XLinearModel predict, Y_pred")
             else:
                 Y_pred = self.model.predict_on_selected_outputs(
                     X,

@@ -577,7 +577,7 @@ class MLModel(pecos.BaseClass):
             verbose (int, optional): verbose level. Defaults to 0
         """
 
-        threshold: float = 0 # TODO: change back to 0.1, remem: change to 0 to test/verify if w is correct for train and fine_tune
+        threshold: float = 0.1
         max_nonzeros_per_label: int = None  # type: ignore
         solver_type: str = "L2R_L2LOSS_SVC_DUAL"
         Cp: float = 1.0
@@ -601,7 +601,7 @@ class MLModel(pecos.BaseClass):
             if train_kwargs is not None:
                 if not isinstance(train_kwargs, dict):
                     raise TypeError("type(train_kwargs) must be dict")
-                overridden_only_topk = train_kwargs.get("only_topk", None) # TODO remem
+                overridden_only_topk = train_kwargs.get("only_topk", None)
                 overridden_post_processor = train_kwargs.get("post_processor", None)
                 if overridden_only_topk:
                     self.only_topk = overridden_only_topk
@@ -717,9 +717,7 @@ class MLModel(pecos.BaseClass):
         W = smat_util.load_matrix("{}/W.npz".format(folder)).tocsc().sorted_indices()
         C = smat_util.load_matrix("{}/C.npz".format(folder)).tocsc().sorted_indices()
         pred_params = cls.PredParams.from_dict(param["pred_kwargs"])
-        train_params = cls.TrainParams.from_dict(param["train_kwargs"])
-        # print("W after loaded trained model...", W)
-        return cls(W, C, param["bias"], pred_params, train_params)
+        return cls(W, C, param["bias"], pred_params)
 
     @classmethod
     def load_pred_params(cls, folder):
@@ -734,20 +732,6 @@ class MLModel(pecos.BaseClass):
         with open("{}/param.json".format(folder), "r") as fin:
             param = json.loads(fin.read())
         return cls.PredParams.from_dict(param["pred_kwargs"])
-    # remem
-    @classmethod
-    def load_train_params(cls, folder):
-        """Load train parameter from file.
-
-        Args:
-            folder (str): dir from which the train parameter is loaded.
-
-        Returns:
-            TrainParams
-        """
-        with open("{}/param.json".format(folder), "r") as fin:
-            param = json.loads(fin.read())
-        return cls.TrainParams.from_dict(param["train_kwargs"])
 
     def save(self, folder):
         """Save MLModel to file
@@ -812,7 +796,6 @@ class MLModel(pecos.BaseClass):
         )
         return cls(model, prob.pC, train_params.bias, pred_params)
 
-    # remem
     def fine_tune(self, prob, train_params=None, pred_params=None, **kwargs):
         """Training method for MLModel
 
@@ -840,7 +823,7 @@ class MLModel(pecos.BaseClass):
             train_params.eps = train_params.newton_eps
 
         model = clib.xlinear_single_layer_fine_tune(
-            self.W, # self.bias, # TODO
+            self.W,
             prob.pX,
             prob.pY,
             prob.pC,
@@ -848,8 +831,7 @@ class MLModel(pecos.BaseClass):
             prob.pR,
             **train_params.to_dict(),
         )
-        return MLModel(model, prob.pC, train_params.bias, pred_params, train_params) # !!! remem
-        # if use @classmthod: return cls(model, prob.pC, train_params.bias, pred_params, train_params) # add train_params to let model contain it, order need to be the same as __init__
+        return MLModel(model, prob.pC, train_params.bias, pred_params)
 
     def get_pred_params(self):
         """Return a deep copy of prediction parameters
@@ -1184,18 +1166,9 @@ class HierarchicalMLModel(pecos.BaseClass):
             )
         else:
             pred_params = pred_params.from_dict(pred_params)
-        
-        if train_params is None:
-            train_params = self.TrainParams(
-                model_chain=[MLModel.TrainParams() for _ in range(len(self.model_chain))],
-            )
-        else:  
-            train_params = train_params.from_dict(train_params)
             
         pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
         self.pred_params = pred_params
-        train_params.override_with_kwargs(kwargs.get("train_kwargs", None))
-        self.train_params = train_params
         self.is_predict_only = is_predict_only
 
     def __del__(self):
@@ -1319,9 +1292,8 @@ class HierarchicalMLModel(pecos.BaseClass):
         depth = int(param.get("depth", len(glob("{}/*.model".format(model_folder)))))
         
         if is_predict_only:
-            # print("here") # 1 layer model only
             model = clib.xlinear_load_predict_only(model_folder, **kwargs)
-        else: # multilayers models
+        else:
             model = [MLModel.load(f"{model_folder}/{d}.model") for d in range(depth)]
 
         pred_params = cls.PredParams(
@@ -1329,15 +1301,8 @@ class HierarchicalMLModel(pecos.BaseClass):
                 MLModel.load_pred_params(f"{model_folder}/{d}.model") for d in range(depth)
             ],
         )
-        
-        # remem:
-        train_params = cls.TrainParams(
-            model_chain=[
-                MLModel.load_train_params(f"{model_folder}/{d}.model") for d in range(depth)
-            ],
-        )
-        # print(model) # should be list for multilayer models
-        return cls(model, pred_params=pred_params, is_predict_only=is_predict_only, train_params=train_params)
+
+        return cls(model, pred_params=pred_params, is_predict_only=is_predict_only)
 
     def save(self, folder):
         """Save HierarchicalMLModel to file
@@ -1457,8 +1422,6 @@ class HierarchicalMLModel(pecos.BaseClass):
             pred_params = cls._duplicate_fields_with_name_ending_with_chain(
                 pred_params, cls.PredParams, depth
             )
-            # got pred_params from XLinearModel.train(), save this in order to 
-            # print(pred_params) # HierarchicalMLModel.PredParams(model_chain=[MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge'), MLModel.PredParams(only_topk=20, post_processor='l3-hinge')])
         pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
 
         # construct Y_chain
@@ -1516,7 +1479,6 @@ class HierarchicalMLModel(pecos.BaseClass):
             model_chain.append(cur_model)
         return cls(model_chain, pred_params=pred_params, is_predict_only=False)
 
-    # remem
     def fine_tune(
         self,
         prob,
@@ -1660,17 +1622,15 @@ class HierarchicalMLModel(pecos.BaseClass):
                 if "man" in negative_sampling_scheme:
                     M += smat_util.binarized(M_pred)
                 cur_prob = MLProblem(cur_prob.pX, Y, C=C, M=M, threads=matmul_threads)
-            # remem: use MLModel.fine_tune to replace MLModel.train
+
             mlmodel = self.model_chain[t]
-            # print('fine tuning the ',t,' layer')
             cur_model = mlmodel.fine_tune(
                 cur_prob,
                 train_params=cur_train_params,
                 pred_params=cur_pred_params,
             ) 
             model_chain.append(cur_model)
-        return HierarchicalMLModel(model_chain, pred_params=pred_params, train_params=train_params, is_predict_only=False)            
-        # if use @classmthod: return cls(model_chain, pred_params=pred_params, is_predict_only=False)
+        return HierarchicalMLModel(model_chain, pred_params=pred_params, is_predict_only=False)
     
     def get_pred_params(self):
         return copy.deepcopy(self.pred_params)
@@ -1719,7 +1679,7 @@ class HierarchicalMLModel(pecos.BaseClass):
             raise ValueError("unknown type(pred_params)!!")
         pred_params.override_with_kwargs(kwargs)
 
-        if self.is_predict_only: # remem: 1 layer
+        if self.is_predict_only:
             if csr_codes is not None:
                 raise NotImplementedError(
                     "is_predict_only=True did not support csr_codes being not None"

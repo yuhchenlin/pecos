@@ -714,7 +714,7 @@ class corelib(object):
         )
         return cmodel
 
-    # remem: TODO: now use c_xlinear_load_model_from_disk_ext
+    # remem:
     def xlinear_load_warm_start(
         self,
         folder,

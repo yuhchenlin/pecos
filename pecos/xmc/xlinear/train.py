@@ -203,7 +203,7 @@ def parse_arguments():
         "-t",
         "--threshold",
         type=float,
-        default=0, # TODO: change back to 0.1, remem: change to 0 to test/verify if w is correct for train and fine_tune
+        default=0.1,
         metavar="VAL",
         help="threshold to sparsify the model weights (default 0.1)",
     )
@@ -217,7 +217,6 @@ def parse_arguments():
         help="keep at most NONZEROS weight parameters per label in model(default 0 to denote nr_features + 1)",
     )
 
-    # remem: Warm start
     parser.add_argument(
         "-mw",
         "--model-path-warm-start",
@@ -293,7 +292,6 @@ def do_train(args):
             # threads=args.threads,
             # spherical=not args.no_spherical,
         )
-        # print("cluster_chain")
 
     # load label importance matrix if given
     if args.usn_label_path:
@@ -312,16 +310,10 @@ def do_train(args):
         if getattr(args, kw, None) is not None:
             pred_kwargs[kw] = getattr(args, kw)
 
-    # remem: initial point -> load Xlinear model
-    # match each layer's w
-    # if cluster change (situation will be complicated) -> make the clusters fix first 
     if args.model_path_warm_start:
         xlinear_model = XLinearModel.load(
             args.model_path_warm_start
         )
-        # print(args.model_path_warm_start) # - done
-        print(usn_match_dict, args.negative_sampling, pred_kwargs, args.nr_splits, args.threads,args.Cp,args.Cn,args.bias,args.threshold,args.max_nonzeros_per_label)
-        # {0: None, 1: None} tfn {'beam_size': 10, 'only_topk': 20, 'post_processor': 'l3-hinge'} 2 -1 1.0 1.0 1.0 0.1 0
         xlm = xlinear_model.fine_tune(
             X,
             Y,
@@ -338,7 +330,6 @@ def do_train(args):
             # threshold=args.threshold,
             # max_nonzeros_per_label=args.max_nonzeros_per_label,
         )
-        # print("done")
     else:
         xlm = XLinearModel.train(
             X,
@@ -358,7 +349,6 @@ def do_train(args):
         )
 
     xlm.save(args.model_folder)
-    # print("done")
 
 
 if __name__ == "__main__":

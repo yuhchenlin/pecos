@@ -944,21 +944,6 @@ void multilabel_fine_tune_with_codes(
         model_set[tid].reshape(w_size + (param->bias > 0), nr_labels);
     }
 
-    // Check W input
-    // size_t w_col_size = W->cols;
-    // // printf("W col size = %d\n",w_col_size);
-    // for(size_t i = 0; i < w_col_size; i++) {
-    //     const auto& W_col = W->get_col(i);
-    //     if(i%1000==0){
-    //         printf("W[%d][0]:%f\n",i,W_col.val[0]);    // print first non zero
-    //     }
-    //     // for(size_t idx = 0; idx < W_col.nnz; idx++) {
-    //     //     // printf("W: %f\n", W_col[idx]);
-    //     //     printf("here");
-    //     // }
-    // }
-    // printf("b = ", b);
-
     std::vector<svm_job_t> job_queue;
     if(C != NULL && M != NULL) {
         size_t code_size = C->cols;
