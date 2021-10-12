@@ -482,7 +482,7 @@ class MLProblem(object):
             self.pR = ScipyCscF32.init_from(R.tocsc().astype(dtype))
         else:
             raise NotImplementedError("type(R) = {} is not supported.".format(type(R)))
-        if R is not None:  # verify R and Y has the same non-zero pattern
+        if R is not None:  # verify R and Y has the same non-zero pattern # TODO, remem: check R and Y is the same
             if not np.array_equal(self.pY.buf.indptr, self.pR.buf.indptr):
                 raise ValueError("Invalid relevance matrix: Y.indptr != R.indptr")
             if not np.array_equal(self.pY.buf.indices, self.pR.buf.indices):
@@ -826,7 +826,8 @@ class MLModel(pecos.BaseClass):
             self.W,
             prob.pX,
             prob.pY,
-            prob.pC,
+            prob.pC, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
+            # 10 C -> 1 cluster chain, take out C, so that M wil be easier to get
             prob.pM,
             prob.pR,
             **train_params.to_dict(),
@@ -1542,9 +1543,10 @@ class HierarchicalMLModel(pecos.BaseClass):
             return HierarchicalMLModel([cur_ml_model], pred_params=pred_params, train_params=train_params, is_predict_only=False)
 
         # assert cluster chain in clustering is valid
-        clustering = ClusterChain(clustering)
+        clustering = ClusterChain(clustering) # a list of all C
         assert clustering[-1].shape[0] == prob.nr_labels
         depth = len(clustering)
+        # take out clustering, produce a cluster chain, use ClusterChain()
 
         # construct train_params
         if train_params is None:  # for backward compatibility

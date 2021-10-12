@@ -287,9 +287,10 @@ class XLinearModel(pecos.BaseClass):
                     C, min_codes=train_params.min_codes, nr_splits=train_params.nr_splits
                 )
             matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
-
+        # TODO: only support full-model
         if train_params.mode == "full-model":
             pass
+        # train till X layer
         elif train_params.mode == "matcher":
             if clustering is None:
                 raise ValueError("Expect non-trivial clustering for matcher mode")
@@ -297,7 +298,7 @@ class XLinearModel(pecos.BaseClass):
                 Y = Y.dot(cc).tocsc()
             clustering = ClusterChain(clustering[: -train_params.ranker_level])
             matching_chain = matching_chain[: -train_params.ranker_level]
-        elif train_params.mode == "ranker":
+        elif train_params.mode == "ranker": # train from X layer
             if clustering is None:
                 raise ValueError("Expect non-trivial clustering for ranker mode")
             clustering = ClusterChain(clustering[-train_params.ranker_level :])
@@ -308,8 +309,8 @@ class XLinearModel(pecos.BaseClass):
         prob = MLProblem(X, Y)
         model = self.model.fine_tune(
             prob,
-            clustering=clustering,
-            matching_chain=matching_chain,
+            clustering=clustering, # TODO
+            matching_chain=matching_chain, # TODO
             train_params=train_params.hlm_args,
             pred_params=pred_params.hlm_args,
             **kwargs,

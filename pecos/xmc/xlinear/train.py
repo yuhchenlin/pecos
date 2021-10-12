@@ -218,7 +218,7 @@ def parse_arguments():
     )
 
     parser.add_argument(
-        "-mw",
+        "--init-model-dir",
         "--model-path-warm-start",
         type=str,
         metavar="DIR",
@@ -310,20 +310,21 @@ def do_train(args):
         if getattr(args, kw, None) is not None:
             pred_kwargs[kw] = getattr(args, kw)
 
-    if args.model_path_warm_start:
+    if args.init_model_dir:
+        # TODO: need to check X, Y dimension, clustering
         xlinear_model = XLinearModel.load(
-            args.model_path_warm_start
+            args.init_model_dir
         )
         xlm = xlinear_model.fine_tune(
             X,
             Y,
-            cluster_chain,
+            cluster_chain, # TODO, delete cluster_chain from outside
             # user_supplied_negatives=usn_match_dict,
             # negative_sampling_scheme=args.negative_sampling,
             # pred_kwargs=pred_kwargs,
-            # nr_splits=args.nr_splits,
+            # nr_splits=args.nr_splits, # TODO, delete cluster_chain from outside => becuz control clustering
             # threads=args.threads,
-            solver_type=args.solver_type,
+            solver_type=args.solver_type, # TODO, delete, becuz only can use primal
             # Cp=args.Cp,
             # Cn=args.Cn,
             # bias=args.bias,
