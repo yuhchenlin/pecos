@@ -379,13 +379,30 @@ struct SVMWorker {
         }
     }
 
-    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL) {
+    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL, size_t subcode=NULL, csc_t *W=NULL) {
         if((w_size != this->w_size)
                 || (y_size != this->y_size)
                 || ((param_ptr != NULL) && (param_ptr->solver_type != param.solver_type))) {
             init(w_size, y_size, param_ptr);
         } else {
             param = *param_ptr;
+            // re-initialize w and b
+            for (size_t i=0;i < w_size;i++) {
+                w[i] = 0;
+            }
+            b = 0;          
+
+            if (W!= NULL) {               
+                const auto& W_col = W->get_col(subcode);
+                for (size_t idx = 0; idx < W_col.nnz; idx++) {
+                    if (W_col.idx[idx] < w_size) {
+                        w[W_col.idx[idx]] = W_col.val[idx];
+                    }
+                    else {
+                        b = W_col.val[idx];
+                    }
+                }
+            }
         }
     }
 
@@ -408,11 +425,6 @@ struct SVMWorker {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w);
-        // re-initialize w and b
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
         newton_obj.newton(curr_w, b);
     }
 
@@ -420,11 +432,6 @@ struct SVMWorker {
     void solve_l2r_l1l2_svc(const MAT& X, int seed) {
         dvec_wrapper_t curr_w(w);
         rng_t rng(seed);
-
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
 
         auto get_diag = [&](size_t i) {
             auto class_cost = (inst_info[i].y > 0) ? param.Cp : param.Cn;
@@ -664,10 +671,10 @@ struct SVMJob {
         subcode(subcode),
         param_ptr(param_ptr) { }
 
-    void init_worker(svm_worker_t& worker) const {
+    void init_worker(svm_worker_t& worker, csc_t* w=NULL) const {
         size_t w_size = feat_mat->cols;
         size_t y_size = feat_mat->rows;
-        worker.lazy_init(w_size, y_size, param_ptr);
+        worker.lazy_init(w_size, y_size, param_ptr, subcode, w);
 
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
@@ -849,6 +856,72 @@ void multilabel_train_with_codes(
         auto& local_model = model_set[tid];
         const auto& job = job_queue[job_id];
         job.init_worker(worker);
+        job.solve(worker, local_model, threshold, max_nonzeros_per_label);
+        job.reset_worker(worker);
+    }
+    model->reshape(w_size + (param->bias > 0), nr_labels);
+    model->swap(model_set[0]);
+    for(int tid = 1; tid < threads; tid++) {
+        model->extends(model_set[tid]);
+    }
+}
+
+template<class MAT>
+void multilabel_fine_tune_with_codes(
+    const MAT* feat_mat,
+    const csc_t *Y,
+    const csc_t *C,
+    const csc_t *M,
+    const csc_t *R,
+    coo_t *model,
+    double threshold,
+    uint32_t max_nonzeros_per_label,
+    SVMParameter *param,
+    int threads,
+    csc_t *W
+) {
+    typedef typename MAT::value_type value_type;
+    typedef SVMJob<MAT, value_type> svm_job_t;
+    typedef typename svm_job_t::svm_worker_t svm_worker_t;
+
+    size_t w_size = feat_mat->cols;
+    size_t y_size = feat_mat->rows;
+    size_t nr_labels = Y->cols;
+
+    threads = set_threads(threads);
+    std::vector<svm_worker_t> worker_set(threads);
+    std::vector<coo_t> model_set(threads);
+
+#pragma omp parallel for schedule(static, 1)
+    for(int tid = 0; tid < threads; tid++) {
+        worker_set[tid].init(w_size, y_size, param);
+        model_set[tid].reshape(w_size + (param->bias > 0), nr_labels);
+    }
+
+    std::vector<svm_job_t> job_queue;
+    if(C != NULL && M != NULL) {
+        size_t code_size = C->cols;
+        for(size_t code = 0; code < code_size; code++) {
+            const auto& C_code = C->get_col(code);
+            for(size_t idx = 0; idx < C_code.nnz; idx++) {
+                size_t subcode = static_cast<size_t>(C_code.idx[idx]);
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
+            }
+        }
+    } else {
+        // either C == NULL or M == NULL
+        // pure multi-label setting
+        for(size_t subcode = 0; subcode < nr_labels; subcode++) {
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
+        }
+    }
+#pragma omp parallel for schedule(dynamic, 1)
+    for(size_t job_id = 0; job_id < job_queue.size(); job_id++) {
+        int tid = omp_get_thread_num();
+        auto& worker = worker_set[tid];
+        auto& local_model = model_set[tid];
+        const auto& job = job_queue[job_id];
+        job.init_worker(worker, W);
         job.solve(worker, local_model, threshold, max_nonzeros_per_label);
         job.reset_worker(worker);
     }

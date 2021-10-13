@@ -245,6 +245,14 @@ def parse_arguments():
         help="keep at most NONZEROS weight parameters per label in model(default 0 to denote nr_features + 1)",
     )
 
+    parser.add_argument(
+        "--init-model-dir",
+        "--model-path-warm-start",
+        type=str,
+        metavar="DIR",
+        help="path to the warm start model folder.",
+    )
+
     # Prediction kwargs
     parser.add_argument(
         "-k",
@@ -336,25 +344,47 @@ def do_train(args):
         if getattr(args, kw, None) is not None:
             pred_kwargs[kw] = getattr(args, kw)
 
-    xlm = XLinearModel.train(
-        X,
-        Y,
-        cluster_chain,
-        R=R,
-        user_supplied_negatives=usn_match_dict,
-        negative_sampling_scheme=args.negative_sampling,
-        pred_kwargs=pred_kwargs,
-        nr_splits=args.nr_splits,
-        threads=args.threads,
-        solver_type=args.solver_type,
-        Cp=args.Cp,
-        Cn=args.Cn,
-        bias=args.bias,
-        threshold=args.threshold,
-        max_nonzeros_per_label=args.max_nonzeros_per_label,
-        rel_mode=args.rel_mode,
-        rel_norm=args.rel_norm,
-    )
+    if args.init_model_dir:
+        if args.solver_type != "L2R_L2LOSS_SVC_PRIMAL":
+            raise ValueError("Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
+
+        xlinear_model = XLinearModel.load(args.init_model_dir)
+
+        xlm = xlinear_model.fine_tune(
+            X,
+            Y,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
+            nr_splits=args.nr_splits,
+            threads=args.threads,
+            solver_type=args.solver_type,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
+        )
+    else:
+        xlm = XLinearModel.train(
+            X,
+            Y,
+            cluster_chain,
+            R=R,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
+            nr_splits=args.nr_splits,
+            threads=args.threads,
+            solver_type=args.solver_type,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
+            rel_mode=args.rel_mode,
+            rel_norm=args.rel_norm,
+        )
 
     xlm.save(args.model_folder)
 

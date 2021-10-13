@@ -261,6 +261,66 @@ class XLinearModel(pecos.BaseClass):
         )
         return cls(model)
 
+    def fine_tune(
+        self,
+        X,
+        Y,
+        user_supplied_negatives=None,
+        train_params=None,
+        pred_params=None,
+        **kwargs,
+    ):
+        """Training method for XLinearModel
+
+        Args:
+            X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
+            Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
+            user_supplied_negatives (dict, optional): dictionary of usn matching matrices.
+                See ClusterChain.generate_matching_chain. Defaults to None.
+            train_params (XLinearModel.TrainParams, optional): instance of XLinearModel.TrainParams
+            pred_params (XLinearModel.PredParams, optional): instance of XLinearModel.PredParams
+            kwargs:
+                {"beam_size": INT, "only_topk": INT, "post_processor": STR},
+                Default None to use HierarchicalMLModel.PredParams defaults
+
+        Returns:
+            XLinearModel: the trained XLinearModel
+        """
+        if train_params is None:  # for backward compatibility
+            train_params = self.TrainParams.from_dict(kwargs)
+            train_params.hlm_args = HierarchicalMLModel.TrainParams(
+                neg_mining_chain=kwargs.get("negative_sampling_scheme", "tfn"),
+                model_chain=MLModel.TrainParams.from_dict(kwargs),
+            )
+        else:
+            train_params = self.TrainParams.from_dict(train_params)
+
+        if pred_params is None:
+            pred_params = self.PredParams()
+            pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
+        else:
+            pred_params = self.PredParams.from_dict(pred_params)
+        # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
+
+        if not train_params.min_codes:
+            train_params.min_codes = train_params.nr_splits
+
+        # Fine tune only supports full-model
+        if train_params.mode == "full-model":
+            pass
+        else:
+            raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+
+        prob = MLProblem(X, Y)
+        model = self.model.fine_tune(
+            prob,
+            user_supplied_negatives=user_supplied_negatives,
+            train_params=train_params.hlm_args,
+            pred_params=pred_params.hlm_args,
+            **kwargs,
+        )
+        return XLinearModel(model)
+
     def set_output_constraint(self, labels_to_keep):
         """
         Prune clustering tree to only output labels in labels_to_keep set.

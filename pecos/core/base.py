@@ -542,6 +542,17 @@ class corelib(object):
             [POINTER(ScipyDrmF32)] + arg_list[1:],
         )
 
+        corelib.fillprototype(
+            self.clib_float32.c_xlinear_single_layer_fine_tune_csr_f32,
+            None,
+            [POINTER(ScipyCsrF32)] + arg_list[1:],
+        )
+        corelib.fillprototype(
+            self.clib_float32.c_xlinear_single_layer_fine_tune_drm_f32,
+            None,
+            [POINTER(ScipyDrmF32)] + arg_list[1:],
+        )
+
         arg_list = [c_void_p]
         corelib.fillprototype(self.clib_float32.c_xlinear_destruct_model, None, arg_list)
 
@@ -978,6 +989,7 @@ class corelib(object):
         pC,
         pM,
         pR,
+        pW=None,
         threshold=0.1,
         max_nonzeros_per_label=None,
         solver_type="L2R_L2LOSS_SVC_DUAL",
@@ -1018,30 +1030,61 @@ class corelib(object):
         """
         clib = self.clib_float32
         coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
-        if isinstance(pX, ScipyCsrF32):
-            c_xlinear_single_layer_train = clib.c_xlinear_single_layer_train_csr_f32
-        elif isinstance(pX, ScipyDrmF32):
-            c_xlinear_single_layer_train = clib.c_xlinear_single_layer_train_drm_f32
-        else:
-            raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
 
-        c_xlinear_single_layer_train(
-            byref(pX),
-            byref(pY),
-            byref(pC) if pC is not None else None,
-            byref(pM) if pM is not None else None,
-            byref(pR) if pR is not None else None,
-            coo_alloc.cfunc,
-            threshold,
-            0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
-            XLINEAR_SOLVERS[solver_type],
-            Cp,
-            Cn,
-            max_iter,
-            eps,
-            bias,
-            threads,
-        )
+        if pW is not None:
+            pW = ScipyCscF32.init_from(pW)
+            pC = ScipyCscF32.init_from(pC)
+
+            if isinstance(pX, ScipyCsrF32):
+                c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_csr_f32
+            elif isinstance(pX, ScipyDrmF32):
+                c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_drm_f32
+            else:
+                raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
+
+            c_xlinear_single_layer_fine_tune(
+                byref(pX),
+                byref(pY),
+                byref(pC) if pC is not None else None,
+                byref(pM) if pM is not None else None,
+                byref(pR) if pR is not None else None,
+                coo_alloc.cfunc,
+                threshold,
+                0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
+                XLINEAR_SOLVERS[solver_type],
+                Cp,
+                Cn,
+                max_iter,
+                eps,
+                bias,
+                threads,
+                byref(pW),
+            )
+        else:
+            if isinstance(pX, ScipyCsrF32):
+                c_xlinear_single_layer_train = clib.c_xlinear_single_layer_train_csr_f32
+            elif isinstance(pX, ScipyDrmF32):
+                c_xlinear_single_layer_train = clib.c_xlinear_single_layer_train_drm_f32
+            else:
+                raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
+
+            c_xlinear_single_layer_train(
+                byref(pX),
+                byref(pY),
+                byref(pC) if pC is not None else None,
+                byref(pM) if pM is not None else None,
+                byref(pR) if pR is not None else None,
+                coo_alloc.cfunc,
+                threshold,
+                0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
+                XLINEAR_SOLVERS[solver_type],
+                Cp,
+                Cn,
+                max_iter,
+                eps,
+                bias,
+                threads,
+            )
         return coo_alloc.tocsc().astype(np.float32)
 
     def xlinear_get_int_attr(self, c_model, attr):
