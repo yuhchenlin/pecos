@@ -822,11 +822,14 @@ class MLModel(pecos.BaseClass):
         if train_params.solver_type == "L2R_L2LOSS_SVC_PRIMAL":
             train_params.eps = train_params.newton_eps
 
+        if np.array_equal(prob.pC, self.C.indptr):
+            raise ValueError("C is not valid!")
+
         model = clib.xlinear_single_layer_fine_tune(
             self.W,
             prob.pX,
             prob.pY,
-            self.C, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
+            prob.pC, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
             # 10 C -> 1 cluster chain, take out C, so that M wil be easier to get
             prob.pM,
             prob.pR,
@@ -1513,6 +1516,7 @@ class HierarchicalMLModel(pecos.BaseClass):
             )
 
         clustering = [mlmodel.C for mlmodel in self.model_chain]
+
         # assert cluster chain in clustering is valid
         clustering = ClusterChain(clustering) # a list of all C
         matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
