@@ -311,7 +311,9 @@ def do_train(args):
             pred_kwargs[kw] = getattr(args, kw)
 
     if args.init_model_dir:
-        # TODO: need to check X, Y dimension, solver_type
+        if args.solver_type!="L2R_L2LOSS_SVC_PRIMAL":
+            raise ValueError("Solver type is not valid! Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
+
         xlinear_model = XLinearModel.load(
             args.init_model_dir
         )
@@ -320,34 +322,34 @@ def do_train(args):
             X,
             Y,
             # # cluster_chain, # TODO, delete cluster_chain from outside
-            # user_supplied_negatives=usn_match_dict,
-            # negative_sampling_scheme=args.negative_sampling,
-            # pred_kwargs=pred_kwargs,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
             # nr_splits=args.nr_splits, # TODO, delete cluster_chain from outside => becuz control clustering
-            # threads=args.threads,
+            threads=args.threads,
             # # solver_type=args.solver_type, # TODO, delete, becuz only can use primal
-            # Cp=args.Cp,
-            # Cn=args.Cn,
-            # bias=args.bias,
-            # threshold=args.threshold,
-            # max_nonzeros_per_label=args.max_nonzeros_per_label,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
         )
     else:
         xlm = XLinearModel.train(
             X,
             Y,
             cluster_chain,
-            # user_supplied_negatives=usn_match_dict,
-            # negative_sampling_scheme=args.negative_sampling,
-            # pred_kwargs=pred_kwargs,
-            # nr_splits=args.nr_splits,
-            # threads=args.threads,
+            user_supplied_negatives=usn_match_dict,
+            negative_sampling_scheme=args.negative_sampling,
+            pred_kwargs=pred_kwargs,
+            nr_splits=args.nr_splits,
+            threads=args.threads,
             solver_type=args.solver_type,
-            # Cp=args.Cp,
-            # Cn=args.Cn,
-            # bias=args.bias,
-            # threshold=args.threshold,
-            # max_nonzeros_per_label=args.max_nonzeros_per_label,
+            Cp=args.Cp,
+            Cn=args.Cn,
+            bias=args.bias,
+            threshold=args.threshold,
+            max_nonzeros_per_label=args.max_nonzeros_per_label,
         )
 
     xlm.save(args.model_folder)

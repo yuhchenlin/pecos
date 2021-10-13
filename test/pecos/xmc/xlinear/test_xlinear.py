@@ -259,6 +259,7 @@ def test_consistency_of_warm_start(tmpdir):
     true_Y_pred_file = "test/tst-data/xmc/xlinear/Yt_primal_pred.npz"
     test_Y_pred_file = str(tmpdir.join("Yt_pred_test.npz"))
     model_folder = str(tmpdir.join("save_model"))
+    threshold = 0.0 # need to give threshold!
 
     np.save(train_dX_file, smat_util.load_matrix(train_sX_file).toarray(), allow_pickle=False)
     np.save(test_dX_file, smat_util.load_matrix(test_sX_file).toarray(), allow_pickle=False)
@@ -272,6 +273,7 @@ def test_consistency_of_warm_start(tmpdir):
             cmd += ["-y {}".format(train_Y_file)]
             cmd += ["-m {}".format(model_folder)]
             cmd += ["-s {}".format(solver_type)]
+            cmd += ["-t {}".format(threshold)] # need to give threshold!
             process = subprocess.run(
                 shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE
             )
@@ -284,6 +286,7 @@ def test_consistency_of_warm_start(tmpdir):
             cmd += ["-y {}".format(train_Y_file)]
             cmd += ["-m {}".format(model_folder)]
             cmd += ["-s {}".format(solver_type)]
+            cmd += ["-t {}".format(threshold)] # need to give threshold!
             cmd += ["--init-model-dir {}".format(model_folder)] # add warm start model path
             process = subprocess.run(
                 shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE

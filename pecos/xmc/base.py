@@ -482,7 +482,7 @@ class MLProblem(object):
             self.pR = ScipyCscF32.init_from(R.tocsc().astype(dtype))
         else:
             raise NotImplementedError("type(R) = {} is not supported.".format(type(R)))
-        if R is not None:  # verify R and Y has the same non-zero pattern # TODO, remem: check R and Y is the same
+        if R is not None:  # verify R and Y has the same non-zero pattern
             if not np.array_equal(self.pY.buf.indptr, self.pR.buf.indptr):
                 raise ValueError("Invalid relevance matrix: Y.indptr != R.indptr")
             if not np.array_equal(self.pY.buf.indices, self.pR.buf.indices):
@@ -822,17 +822,26 @@ class MLModel(pecos.BaseClass):
         if train_params.solver_type == "L2R_L2LOSS_SVC_PRIMAL":
             train_params.eps = train_params.newton_eps
 
+        # Assert X and Y dimensions are valid
+        assert (
+            prob.X.shape[1] + (train_params.bias > 0) == self.W.shape[0]
+        ), f"X.shape[1] = {prob.X.shape[1] + (train_params.bias > 0)} != {self.W.shape[0]} = self.W.shape[0]"
+        assert (
+            prob.Y.shape[1] == self.W.shape[1]
+        ), f"prob.Y.shape[1] = {prob.Y.shape[1]} != {self.W.shape[1]} = self.W.shape[1]"
+
+        # Assert prob.pC is identical to self.C from loaded model
         if np.array_equal(prob.pC, self.C.indptr):
             raise ValueError("C is not valid!")
 
-        model = clib.xlinear_single_layer_fine_tune(
-            self.W,
+        model = clib.xlinear_single_layer_train(
             prob.pX,
             prob.pY,
             prob.pC, # TODO: prob.pC - external: make sure C is the trained C (need to check prob.pC is the same as self.pC). or use the existing self C (solve.C, the C in the model) (label assignment should match)
             # 10 C -> 1 cluster chain, take out C, so that M wil be easier to get
             prob.pM,
             prob.pR,
+            self.W,
             **train_params.to_dict(),
         )
         return MLModel(model, prob.pC, train_params.bias, pred_params)
@@ -1515,14 +1524,12 @@ class HierarchicalMLModel(pecos.BaseClass):
                 "Cost-senstive learning for HierarchicalMLModel is not yet supported"
             )
 
-        clustering = [mlmodel.C for mlmodel in self.model_chain]
-
         # assert cluster chain in clustering is valid
-        clustering = ClusterChain(clustering) # a list of all C
+        clustering = [mlmodel.C for mlmodel in self.model_chain] # remem
+        clustering = ClusterChain(clustering) # a list of all C # take out clustering, produce a cluster chain, use ClusterChain()
         matching_chain = clustering.genearate_matching_chain(user_supplied_negatives)
         assert clustering[-1].shape[0] == prob.nr_labels
-        depth = len(clustering)
-        # take out clustering, produce a cluster chain, use ClusterChain()
+        depth = len(clustering)        
 
         # construct train_params
         if train_params is None:  # for backward compatibility

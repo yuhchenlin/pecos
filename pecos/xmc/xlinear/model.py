@@ -272,7 +272,7 @@ class XLinearModel(pecos.BaseClass):
         if not train_params.min_codes:
             train_params.min_codes = train_params.nr_splits
 
-        # Fine tune nly supports full-model
+        # Fine tune only supports full-model
         if train_params.mode == "full-model":
             pass
         else:
