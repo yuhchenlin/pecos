@@ -124,6 +124,7 @@ namespace pecos {
             if (gnorm <= eps * gnorm0) {
                 search = 0;
             }
+            // else {printf("Stopping condition doesn't meet!\n");} // remem
 
             while (iter <= max_iter && search) {
                 fun_obj->get_diag_preconditioner(M, bM);

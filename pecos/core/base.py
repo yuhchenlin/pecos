@@ -1011,6 +1011,7 @@ class corelib(object):
             pC (ScipyCscF32): Single matrix from clustering chain, representing a hierarchical clustering.
             pM (ScipyCsrF32): Single matrix from matching chain.
             pR (ScipyCscF32): Relevance matrix for cost-sensitive learning, of shape (nr_inst, nr_labels).
+            pW (ScipyCscF32): Weight matrix from trained model for fine tune, of shape (nr_feat, nr_labels).
             threshold (float, optional): sparsify the final model by eliminating all entrees with abs value less than threshold.
                 Default to 0.1.
             max_nonzeros_per_label (int, optional): keep at most NONZEROS weight parameters per label in model.
@@ -1032,9 +1033,9 @@ class corelib(object):
         coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
 
         if pW is not None:
-            pW = ScipyCscF32.init_from(pW)
-            pC = ScipyCscF32.init_from(pC)
-
+            # don't put it here, format not clean enough
+            # pW = ScipyCscF32.init_from(pW)
+            # pC = ScipyCscF32.init_from(pC)
             if isinstance(pX, ScipyCsrF32):
                 c_xlinear_single_layer_fine_tune = clib.c_xlinear_single_layer_fine_tune_csr_f32
             elif isinstance(pX, ScipyDrmF32):

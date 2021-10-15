@@ -246,8 +246,8 @@ def parse_arguments():
     )
 
     parser.add_argument(
+        "-mw",
         "--init-model-dir",
-        "--model-path-warm-start",
         type=str,
         metavar="DIR",
         help="path to the warm start model folder.",
@@ -286,7 +286,7 @@ def parse_arguments():
 
 
 def do_train(args):
-    """Train and Save xlinear model
+    """Train and Save xlinear model, warm start is supported through fine_tune functions
 
     Args:
         args (argparse.Namespace): Command line arguments parsed by `parser.parse_args()`
@@ -299,27 +299,6 @@ def do_train(args):
     # Load training inputs and labels
     X = XLinearModel.load_feature_matrix(args.inst_path)
     Y = XLinearModel.load_label_matrix(args.label_path, for_training=True)
-
-    if args.code_path:
-        cluster_chain = ClusterChain.load(args.code_path)
-    else:
-        if args.label_feat_path:
-            label_feat = XLinearModel.load_feature_matrix(args.label_feat_path)
-        else:
-            label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
-
-        cluster_chain = Indexer.gen(
-            label_feat,
-            args.indexer,
-            nr_splits=args.nr_splits,
-            max_leaf_size=args.max_leaf_size,
-            imbalanced_depth=args.imbalanced_depth,
-            imbalanced_ratio=args.imbalanced_ratio,
-            seed=args.seed,
-            max_iter=args.max_iter,
-            threads=args.threads,
-            spherical=args.spherical,
-        )
 
     # load label importance matrix if given
     if args.usn_label_path:
@@ -349,10 +328,12 @@ def do_train(args):
             raise ValueError("Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
 
         xlinear_model = XLinearModel.load(args.init_model_dir)
-
+# remem: can take R, becuz R come from problem
+# remem: create cluster_chain only for train, no need for fine_tune
         xlm = xlinear_model.fine_tune(
             X,
             Y,
+            R=R,
             user_supplied_negatives=usn_match_dict,
             negative_sampling_scheme=args.negative_sampling,
             pred_kwargs=pred_kwargs,
@@ -364,8 +345,31 @@ def do_train(args):
             bias=args.bias,
             threshold=args.threshold,
             max_nonzeros_per_label=args.max_nonzeros_per_label,
+            rel_mode=args.rel_mode,
+            rel_norm=args.rel_norm,
         )
     else:
+        # remem: create cluster_chain only for train, no need for fine_tune
+        if args.code_path:
+            cluster_chain = ClusterChain.load(args.code_path)
+        else:
+            if args.label_feat_path:
+                label_feat = XLinearModel.load_feature_matrix(args.label_feat_path)
+            else:
+                label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
+
+            cluster_chain = Indexer.gen(
+                label_feat,
+                args.indexer,
+                nr_splits=args.nr_splits,
+                max_leaf_size=args.max_leaf_size,
+                imbalanced_depth=args.imbalanced_depth,
+                imbalanced_ratio=args.imbalanced_ratio,
+                seed=args.seed,
+                max_iter=args.max_iter,
+                threads=args.threads,
+                spherical=args.spherical,
+            )
         xlm = XLinearModel.train(
             X,
             Y,
