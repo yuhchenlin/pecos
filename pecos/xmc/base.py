@@ -460,7 +460,7 @@ class PostProcessor(object):
 
 
 class MLProblem(object):
-    """Object containing the X, Y, C, M and R matrices that defines a Multi-Label(ML) problem.
+    """Object containing the X, Y, C, M, and R matrices that defines a Multi-Label(ML) problem.
 
     Creates M from Y*C if not given with multi-threading sparse_matmul.
     Y: shape of N by L, the instance-to-label matrix with binary classification signals
@@ -601,10 +601,11 @@ class MLModel(pecos.BaseClass):
             Cp (float, optional): positive penalty parameter. Defaults to 1.0
             Cn (float, optional): negative penalty parameter. Defaults to 1.0
             max_iter (int, optional): maximum iterations. Defaults to 100
-            eps (float, optional): epsilon. Defaults to 0.1
+            eps (float, optional): epsilon. Defaults to 0.1 for L2R_L2LOSS_SVC_DUAL solver
             bias (float, optional): if >0, append the bias value to each instance feature. Defaults to 1.0
             threads (int, optional): the number of threads to use for training. Defaults to -1 to use all
             verbose (int, optional): verbose level. Defaults to 0
+            newton_eps (float, optional): epsilon. Defaults to 0.01 for L2R_L2LOSS_SVC_PRIMAL solver
         """
 
         threshold: float = 0.1
@@ -766,11 +767,12 @@ class MLModel(pecos.BaseClass):
         smat_util.save_matrix("{}/C.npz".format(folder), self.C)
 
     @classmethod
-    def train(cls, prob, train_params=None, pred_params=None, **kwargs):
+    def train(cls, prob, W=None, train_params=None, pred_params=None, **kwargs):
         """Training method for MLModel
 
         Args:
             prob (MLProblem): the problem to solve
+            W (W from MLModel): the weight matrix from trained MLModel for fine tune
             train_params (TrainParams, optional): instance of TrainParams
             pred_params (PredParams, optional): instance of PredParams
             **kwargs: for backward compatibility of old training interface
@@ -788,6 +790,22 @@ class MLModel(pecos.BaseClass):
         if not pred_params.is_valid():
             raise ValueError("pred_params is not valid!")
 
+        if W is not None:
+            # Currently model fine-tuning only support using L2R_L2LOSS_SVC_PRIMAL
+            # Assuming using newton_eps in train_params
+            if train_params.solver_type != "L2R_L2LOSS_SVC_PRIMAL":
+                raise ValueError("Currently only support using L2R_L2LOSS_SVC_PRIMAL.")
+
+            # Assert X and Y dimensions are valid
+            assert (
+                prob.X.shape[1] + (train_params.bias > 0) == W.shape[0]
+            ), f"X.shape[1] = {prob.X.shape[1] + (train_params.bias > 0)} != {W.shape[0]} = W.shape[0]"
+            assert (
+                prob.Y.shape[1] == W.shape[1]
+            ), f"prob.Y.shape[1] = {prob.Y.shape[1]} != {W.shape[1]} = W.shape[1]"
+
+            W = ScipyCscF32.init_from(W)
+
         # Assuming using newton_eps in train_params
         if train_params.solver_type == "L2R_L2LOSS_SVC_PRIMAL":
             train_params.eps = train_params.newton_eps
@@ -798,9 +816,26 @@ class MLModel(pecos.BaseClass):
             prob.pC,
             prob.pM,
             prob.pR,
+            W,
             **train_params.to_dict(),
         )
         return cls(model, prob.pC, train_params.bias, pred_params)
+
+    def fine_tune(self, prob, train_params=None, pred_params=None, **kwargs):
+        """Fine tune method for MLModel
+
+        Args:
+            prob (MLProblem): the problem to solve
+            train_params (TrainParams, optional): instance of TrainParams
+            pred_params (PredParams, optional): instance of PredParams
+            **kwargs: for backward compatibility of old training interface
+                pred_kwargs (dict, optional): prediction kwargs {"only_topk": INT, "post_processor": STR}.
+                    If provided, will override pred_params value. Default None to use pred_params's default
+        Returns:
+            MLModel: the trained MLModel
+        """
+
+        return MLModel.train(prob, self.W, train_params, pred_params, **kwargs)
 
     def get_pred_params(self):
         """Return a deep copy of prediction parameters
@@ -1254,6 +1289,17 @@ class HierarchicalMLModel(pecos.BaseClass):
         )
         return cls(model, pred_params=pred_params, is_predict_only=is_predict_only)
 
+    def get_cluster_chain(self):
+        """Get the cluster chain from trained model
+
+        Returns:
+            clustering (ClusterChain or None, optional): cluster chain for the model
+                Default None for the One-Versus-All problem.
+        """
+        clustering = [mlmodel.C for mlmodel in self.model_chain]
+        clustering = ClusterChain(clustering)
+        return clustering
+
     def save(self, folder):
         """Save HierarchicalMLModel to file
 
@@ -1284,6 +1330,7 @@ class HierarchicalMLModel(pecos.BaseClass):
     def train(
         cls,
         prob,
+        model=None,
         clustering=None,
         relevance_chain=None,
         matching_chain=None,
@@ -1295,6 +1342,7 @@ class HierarchicalMLModel(pecos.BaseClass):
 
         Args:
             prob (MLProblem): the problem to solve
+            model (list of model_chain): the model_chain from HierarchicalMLModel
             clustering (ClusterChain or None, optional): cluster chain for the model hierarchy
                 Default None for the One-Versus-All problem.
             relevance_chain (list of spmatrix): the relevance_chain for cost sensitive learning.
@@ -1342,7 +1390,8 @@ class HierarchicalMLModel(pecos.BaseClass):
             return HierarchicalMLModel([ml_model], pred_params=pred_params, is_predict_only=False)
 
         # assert cluster chain in clustering is valid
-        clustering = ClusterChain(clustering)
+        if not model:
+            clustering = ClusterChain(clustering)
         assert clustering[-1].shape[0] == prob.nr_labels
         depth = len(clustering)
 
@@ -1431,11 +1480,62 @@ class HierarchicalMLModel(pecos.BaseClass):
                     M += smat_util.binarized(M_pred)
 
             cur_prob = MLProblem(cur_prob.pX, Y, R=R, C=C, M=M, threads=matmul_threads)
-            cur_model = MLModel.train(
-                cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
-            )
+            if not model:
+                cur_model = MLModel.train(
+                    cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
+                )
+            else:
+                mlmodel = model[t]
+                cur_model = mlmodel.fine_tune(
+                    cur_prob,
+                    train_params=cur_train_params,
+                    pred_params=cur_pred_params,
+                )
             model_chain.append(cur_model)
         return cls(model_chain, pred_params=pred_params, is_predict_only=False)
+
+    def fine_tune(
+        self,
+        prob,
+        clustering=None,
+        relevance_chain=None,
+        matching_chain=None,
+        train_params=None,
+        pred_params=None,
+        **kwargs,
+    ):
+        """Fine tune method for HierarchicalMLModel
+
+        Args:
+            prob (MLProblem): the problem to solve
+            clustering (ClusterChain or None, optional): cluster chain for the model hierarchy
+                Default None for the One-Versus-All problem.
+            relevance_chain (list of spmatrix): the relevance_chain for cost sensitive learning.
+                skip cost-sensitive learning for level i if relevance_chain[i] is None,
+                Default None to ignore.
+            matching_chain (list of csr_matrix): the matching_chain generated by user-supplied-negatives.
+                Their indices will be added to the negative samples if 'usn' in negative_sampling_scheme.
+                Default None to ignore.
+            train_params (HierarchicalMLModel.TrainParams, optional): training kwargs for each layer
+            pred_params (HierarchicalMLModel.PredParams, optional): prediction kwargs for each layer
+            kwargs: containing keyword arguments for the solver. See MLModel.TrainParams
+                pred_kwargs (dict, optional): prediction kwargs {"beam_size": INT, "only_topk": INT, "post_processor": STR},
+                    Default None to use HierarchicalMLModel.DEFAULT_PRED_KWARGS
+
+        Returns:
+            HierarchicalMLModel: the trained HierarchicalMLModel
+        """
+
+        return HierarchicalMLModel.train(
+            prob,
+            self.model_chain,
+            clustering,
+            relevance_chain,
+            matching_chain,
+            train_params,
+            pred_params,
+            **kwargs,
+        )
 
     def get_pred_params(self):
         return copy.deepcopy(self.pred_params)

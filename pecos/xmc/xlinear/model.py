@@ -133,6 +133,16 @@ class XLinearModel(pecos.BaseClass):
         )
         return cls(model)
 
+    def get_cluster_chain(self):
+        """Get the cluster chain from trained model
+
+        Returns:
+            clustering (ClusterChain or None, optional): cluster chain for the model
+                Default None for the One-Versus-All problem.
+        """
+        clustering = self.model.get_cluster_chain()
+        return clustering
+
     @property
     def is_predict_only(self):
         """
@@ -260,6 +270,91 @@ class XLinearModel(pecos.BaseClass):
             **kwargs,
         )
         return cls(model)
+
+    def fine_tune(
+        self,
+        X,
+        Y,
+        R=None,
+        user_supplied_negatives=None,
+        train_params=None,
+        pred_params=None,
+        **kwargs,
+    ):
+        """Fine tune method for XLinearModel
+
+        Args:
+            X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
+            Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
+            R (csc_matrix(float32)): relevance matrix for cost sensitive learning. Default None.
+            user_supplied_negatives (dict, optional): dictionary of usn matching matrices.
+                See ClusterChain.generate_matching_chain. Defaults to None.
+            train_params (XLinearModel.TrainParams, optional): instance of XLinearModel.TrainParams
+            pred_params (XLinearModel.PredParams, optional): instance of XLinearModel.PredParams
+            kwargs:
+                {"beam_size": INT, "only_topk": INT, "post_processor": STR},
+                Default None to use HierarchicalMLModel.PredParams defaults
+
+        Returns:
+            XLinearModel: the trained XLinearModel
+        """
+        if train_params is None:  # for backward compatibility
+            train_params = self.TrainParams.from_dict(kwargs)
+            train_params.hlm_args = HierarchicalMLModel.TrainParams(
+                neg_mining_chain=kwargs.get("negative_sampling_scheme", "tfn"),
+                model_chain=MLModel.TrainParams.from_dict(kwargs),
+            )
+        else:
+            train_params = self.TrainParams.from_dict(train_params)
+
+        if pred_params is None:
+            pred_params = self.PredParams()
+            pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
+        else:
+            pred_params = self.PredParams.from_dict(pred_params)
+        # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
+
+        if not train_params.min_codes:
+            train_params.min_codes = train_params.nr_splits
+
+        # Fine tune only supports full-model
+        if train_params.mode == "full-model":
+            pass
+        else:
+            raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+
+        clustering = self.get_cluster_chain()
+        matching_chain = clustering.generate_matching_chain(user_supplied_negatives)
+
+        if train_params.rel_mode == "disable":
+            relevance_chain = [None] * len(clustering)
+        elif train_params.rel_mode == "induce":
+            relevance_chain = clustering.generate_relevance_chain(
+                {0: R if R is not None else smat_util.binarized(Y)},
+                norm_type=train_params.rel_norm,
+                induce=True,
+            )
+        elif train_params.rel_mode == "ranker-only":
+            relevance_chain = clustering.generate_relevance_chain(
+                {0: R},
+                norm_type=train_params.rel_norm,
+                induce=False,
+            )
+        else:
+            raise ValueError(f"Wrong value for rel_mode: {train_params.rel_mode}")
+
+        # include R in prob for OVA training
+        prob = MLProblem(X, Y, R=R)
+        self.model.fine_tune(
+            prob,
+            clustering=clustering,
+            relevance_chain=relevance_chain,
+            matching_chain=matching_chain,
+            train_params=train_params.hlm_args,
+            pred_params=pred_params.hlm_args,
+            **kwargs,
+        )
+        return self
 
     def set_output_constraint(self, labels_to_keep):
         """
