@@ -392,7 +392,7 @@ struct SVMWorker {
             for (size_t i=0;i < w_size;i++) {
                 w[i] = 0;
             }
-            b = 0;          
+            b = 0;
 
             if (W!= NULL) {
                 const auto& W_col = W->get_col(subcode);
@@ -406,13 +406,6 @@ struct SVMWorker {
                     }
                 }
             }
-            // Print 1st w
-            // printf("fine_tune 1st w:\n");
-            // for (size_t i=0;i < w_size;i++) {
-            // // for (auto& i : index) {
-            //     printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
-            // }
-            // printf("b = ", b);
         }
     }
 
@@ -435,17 +428,7 @@ struct SVMWorker {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w);
-        // re-initialize w and b // For fine tune, cannot reinitialize to 0!
-        // for(size_t j = 0; j < w_size; j++) {
-        //     curr_w[j] = 0;
-        // }
-        // b = 0;
         newton_obj.newton(curr_w, b);
-        // Last w
-        for (uint64_t i = 0; i < w_size; i++) {
-            printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
-        }
-        printf("b = ", b);
     }
 
     template<typename MAT>
@@ -862,20 +845,6 @@ void multilabel_train_with_codes(
         model_set[tid].reshape(w_size + (param->bias > 0), nr_labels);
     }
 
-    // Check W input
-    // size_t w_col_size = W->cols;
-    // // printf("W col size = %d\n",w_col_size);
-    // for(size_t i = 0; i < w_col_size; i++) {
-    //     const auto& W_col = W->get_col(i);
-    //     if(i%1000==0){
-    //         printf("W[%d][0]:%f\n",i,W_col.val[0]);    // print first non zero
-    //     }
-    //     // for(size_t idx = 0; idx < W_col.nnz; idx++) {
-    //     //     // printf("W: %f\n", W_col[idx]);
-    //     //     printf("here");
-    //     // }
-    // }
-    // printf("b = ", b);
     std::vector<svm_job_t> job_queue;
     if(C != NULL && M != NULL) {
         size_t code_size = C->cols;
