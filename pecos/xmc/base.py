@@ -18,7 +18,6 @@ from glob import glob
 from os import path
 
 import dataclasses as dc
-from typing import ChainMap
 import numpy as np
 import pecos
 import scipy.sparse as smat
