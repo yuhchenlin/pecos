@@ -275,7 +275,7 @@ class XLinearModel(pecos.BaseClass):
         self,
         X,
         Y,
-        R,
+        R=None,
         user_supplied_negatives=None,
         train_params=None,
         pred_params=None,
@@ -323,14 +323,11 @@ class XLinearModel(pecos.BaseClass):
         else:
             raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
 
-        # remem: loop over self.model.model_chain 
-        # or get_cluster_chain function (return an object of cluster chain), respectively in XLinearModel and HierarchicalMLModel
-        # HierarchicalMLModel fine_tune call its train and reuse code last 13:40
         clustering = self.get_cluster_chain()
         matching_chain = clustering.generate_matching_chain(user_supplied_negatives)
 
         if train_params.rel_mode == "disable":
-                relevance_chain = [None] * len(clustering)
+            relevance_chain = [None] * len(clustering)
         elif train_params.rel_mode == "induce":
             relevance_chain = clustering.generate_relevance_chain(
                 {0: R if R is not None else smat_util.binarized(Y)},
@@ -356,9 +353,8 @@ class XLinearModel(pecos.BaseClass):
             train_params=train_params.hlm_args,
             pred_params=pred_params.hlm_args,
             **kwargs,
-        ) # remem: no need: model = self.model.fine_tune()
-        # so no need: return XLinearModel(model) it self => in place
-        return self # return XLinearModel(model) it self => in place
+        )
+        return self
 
     def set_output_constraint(self, labels_to_keep):
         """

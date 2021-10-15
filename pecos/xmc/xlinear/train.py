@@ -328,8 +328,6 @@ def do_train(args):
             raise ValueError("Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
 
         xlinear_model = XLinearModel.load(args.init_model_dir)
-# remem: can take R, becuz R come from problem
-# remem: create cluster_chain only for train, no need for fine_tune
         xlm = xlinear_model.fine_tune(
             X,
             Y,
@@ -349,7 +347,6 @@ def do_train(args):
             rel_norm=args.rel_norm,
         )
     else:
-        # remem: create cluster_chain only for train, no need for fine_tune
         if args.code_path:
             cluster_chain = ClusterChain.load(args.code_path)
         else:

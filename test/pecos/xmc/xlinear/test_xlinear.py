@@ -325,6 +325,78 @@ def test_consistency_of_warm_start(tmpdir):
             Yt_selected_pred = smat_util.load_matrix(test_Y_pred_file)
             assert Yt_selected_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
 
+    # test Python API
+    from pecos.xmc import MLProblem, MLModel
+
+    train_X_file = "test/tst-data/xmc/xlinear/X.npz"
+    train_Y_file = "test/tst-data/xmc/xlinear/Y.npz"
+
+    X = smat_util.load_matrix(train_X_file)
+    Y = smat_util.load_matrix(train_Y_file)
+
+    Cp = 2.0
+    R = smat_util.binarized(Y)
+    R.data = Cp * R.data
+
+    # test MLModel
+    # Cp=2.0 and R=none should equiv to Cp=1.0 and R=2.0
+    model_v0 = MLModel.train(
+        MLProblem(X, Y, C=None, M=None, R=None),
+        train_params=MLModel.TrainParams(Cp=Cp, solver_type="L2R_L2LOSS_SVC_PRIMAL"),
+    )
+
+    model_v1 = model_v0.fine_tune(
+        MLProblem(X, Y, C=None, M=None, R=R),
+        train_params=MLModel.TrainParams(Cp=1.0, solver_type="L2R_L2LOSS_SVC_PRIMAL"),
+    )
+
+    model_v2 = model_v0.fine_tune(
+        MLProblem(X, Y, C=None, M=None, R=R),
+        train_params=MLModel.TrainParams(Cp=1.0, solver_type="L2R_L2LOSS_SVC_PRIMAL"),
+    )
+    assert model_v1.W.todense() == approx(model_v2.W.todense(), abs=1e-9)
+
+    # test XLinearModel
+    # test data has one positve label per instance
+    # therefore Cp=2.0 and R=none should still equiv to Cp=1.0 and R=2.0
+    from pecos.xmc.xlinear import XLinearModel
+    from pecos.xmc import Indexer, LabelEmbeddingFactory
+
+    label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
+    cluster_chain = Indexer.gen(label_feat, max_leaf_size=2)
+    xlm_v0 = XLinearModel.train(
+        X,
+        Y,
+        C=cluster_chain,
+        R=R,
+        train_params={
+            "rel_norm": "no-norm",
+            "rel_mode": "induce",
+            "solver_type": "L2R_L2LOSS_SVC_PRIMAL",
+        },
+    )
+    xlm_v1 = xlm_v0.fine_tune(
+        X,
+        Y,
+        C=cluster_chain,
+        train_params={
+            "hlm_args": {"model_chain": {"Cp": Cp, "solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}
+        },
+    )
+    xlm_v2 = xlm_v0.fine_tune(
+        X,
+        Y,
+        C=cluster_chain,
+        train_params={
+            "hlm_args": {"model_chain": {"Cp": Cp, "solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}
+        },
+    )
+
+    for d in range(len(cluster_chain)):
+        assert xlm_v1.model.model_chain[d].W.todense() == approx(
+            xlm_v2.model.model_chain[d].W.todense()
+        )
+
 
 def test_consistency_of_primal(tmpdir):
     import subprocess

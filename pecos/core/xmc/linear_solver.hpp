@@ -67,8 +67,9 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
     std::vector<int> I;
     int sizeI;
     const SVMParameter *param;
-    WORKER *worker;
+
     const MAT &X;
+    WORKER *worker;
 
    protected:
     double wTw;
@@ -102,29 +103,23 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
 
     double fun(dvec_wrapper_t w, value_type &b) {
         double f = 0;
-        uint64_t y_size = worker->y_size;
-        uint64_t w_size = worker->w_size;
         wTw = 0;
         Xv(w, wx, b);
-        
+
         wTw = do_dot_product(w, w);
         if (param->bias > 0) {
             wTw += (double) b * b;
         }
-        
+
         for (auto &i : worker->index) {
             f += this->C_times_loss(i, wx[i]);
         }
-        
+
         f = f + 0.5 * wTw;
         return f;
     }
 
     double linesearch_and_update(double *f, double alpha, dvec_wrapper_t w, dvec_wrapper_t s, dvec_wrapper_t g, value_type &b, value_type &bs, value_type &bg) {
-        uint64_t y_size = worker->y_size;
-        double sTs = 0;
-        double wTs = 0;
-        double gTs = 0;
         double eta = 0.01;
         uint64_t n = get_w_size();
         int max_num_linesearch = 20;
@@ -135,15 +130,14 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
         dvec_wrapper_t new_w(tmp_new_w);
         value_type new_b;
 
-        gTs = do_dot_product(s, g);
+        double gTs = do_dot_product(s, g);
         if (param->bias > 0) {
             gTs += (double) bs * bg;
         }
-        
+
         int num_linesearch = 0;
         for (num_linesearch = 0; num_linesearch < max_num_linesearch; num_linesearch++) {
-            double loss = 0;
-            for (int i = 0; i < n; i++) {
+            for (uint64_t i = 0; i < n; i++) {
                 new_w[i] = w[i] + alpha * s[i];
             }
             new_b = b + alpha * bs;
@@ -158,7 +152,7 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
             *f = fold;
             return 0;
         } else {
-            for (int i = 0; i < n; i++) {
+            for (uint64_t i = 0; i < n; i++) {
                 w[i] = new_w[i];
             }
             if (param->bias > 0) {
@@ -169,8 +163,6 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
     }
 
     void Xv(dvec_wrapper_t w, dvec_wrapper_t Xv, value_type &b) {
-        uint64_t y_size = this->worker->y_size;
-        uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
         for (auto &i : this->worker->index) {
             const auto &xi = X.get_row(i);
@@ -199,8 +191,6 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     }
 
     void grad(dvec_wrapper_t w, dvec_wrapper_t G, value_type &b, value_type &bg) {
-        uint64_t y_size = this->worker->y_size;
-        uint64_t w_size = this->worker->w_size;
         this->sizeI = 0;
         for (auto &i : this->worker->index) {
             this->tmp[i] = this->wx[i] * this->worker->inst_info[i].y;
@@ -220,7 +210,7 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     void get_diag_preconditioner(dvec_wrapper_t M, value_type &bM) {
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
-        for (int i = 0; i < w_size; i++) {
+        for (uint64_t i = 0; i < w_size; i++) {
             M[i] = 1;
         }
         bM = 1;
@@ -237,7 +227,7 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     void Hv(dvec_wrapper_t s, dvec_wrapper_t Hs, value_type &bs, value_type &bHs) {
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
-        for (int i = 0; i < w_size; i++) {
+        for (uint64_t i = 0; i < w_size; i++) {
             Hs[i] = 0;
         }
         bHs = 0;
@@ -259,27 +249,20 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     }
 
     double linesearch_and_update(double *f, double alpha, dvec_wrapper_t w, dvec_wrapper_t s, dvec_wrapper_t g, value_type &b, value_type &bs, value_type &bg) {
-        uint64_t y_size = this->worker->y_size;
-        double sTs = 0;
-        double wTs = 0;
-        double gTs = 0;
         double eta = 0.01;
-        uint64_t n = this->get_w_size();
         int max_num_linesearch = 20;
         double fold = *f;
-        const MAT &X = this->X;
-        const auto &xi = X.get_row(0);
         this->Xv(s, this->tmp, bs);
 
-        sTs = do_dot_product(s, s);
+        double sTs = do_dot_product(s, s);
         if (this->param->bias > 0) {
             sTs += (double) bs * bs;
         }
-        wTs = do_dot_product(s, w);
+        double wTs = do_dot_product(s, w);
         if (this->param->bias > 0) {
             wTs += (double) bs * b;
         }
-        gTs = do_dot_product(s, g);
+        double gTs = do_dot_product(s, g);
         if (this->param->bias > 0) {
             gTs += (double) bs * bg;
         }
@@ -316,7 +299,7 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     void subXTv(dvec_wrapper_t v, dvec_wrapper_t G, value_type &bg) {
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
-        for (int i = 0; i < w_size; i++) {
+        for (size_t i = 0; i < w_size; i++) {
             G[i] = 0;
         }
         bg = 0;
@@ -397,7 +380,7 @@ struct SVMWorker {
         }
     }
 
-    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL, size_t subcode=NULL, csc_t *W=NULL) {
+    void lazy_init(size_t w_size, size_t y_size, const SVMParameter *param_ptr=NULL, size_t subcode=NULL, const csc_t *W=NULL) {
         if((w_size != this->w_size)
                 || (y_size != this->y_size)
                 || ((param_ptr != NULL) && (param_ptr->solver_type != param.solver_type))) {
@@ -410,8 +393,7 @@ struct SVMWorker {
                 w[i] = 0;
             }
             b = 0;          
-            // printf("w size = %d\n",w_size);
-            // printf("W size = %d\n",W->rows);
+
             if (W!= NULL) {
                 const auto& W_col = W->get_col(subcode);
                 for (size_t idx = 0; idx < W_col.nnz; idx++) {
@@ -434,7 +416,7 @@ struct SVMWorker {
         }
     }
 
-    template<typename MAT> // remem take subcode for printing it (to know the order of w)
+    template<typename MAT>
     void solve(const MAT& X, int seed=0, size_t subcode=NULL) {
         // the solution will be available in w and b
         if(param.solver_type == L2R_L1LOSS_SVC_DUAL) {
@@ -444,11 +426,11 @@ struct SVMWorker {
         } else if(param.solver_type == L2R_LR_DUAL) {
             solve_l2r_lr(X, seed);
         } else if (param.solver_type == L2R_L2LOSS_SVC_PRIMAL) {
-            solve_l2r_l2_svc_primal(X, seed, subcode); // remem take subcode for printing it (to know the order of w)
+            solve_l2r_l2_svc_primal(X, seed, subcode);
         }
     }
 
-    template <typename MAT> // remem take subcode for printing it (to know the order of w)
+    template <typename MAT>
     void solve_l2r_l2_svc_primal(const MAT &X, int seed, size_t subcode=NULL) {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
@@ -460,12 +442,12 @@ struct SVMWorker {
         // b = 0;
         newton_obj.newton(curr_w, b);
         // Last w
-        for (uint64_t i = 0; i < w_size; i++) {
-            printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
-        }
-        printf("b = ", b);
+        // for (uint64_t i = 0; i < w_size; i++) {
+        //     printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
+        // }
+        // printf("b = ", b);
     }
-    
+
     template<typename MAT>
     void solve_l2r_l1l2_svc(const MAT& X, int seed) {
         dvec_wrapper_t curr_w(w);
@@ -686,11 +668,12 @@ struct SVMWorker {
 template<class MAT, class value_type=float64_t>
 struct SVMJob {
     typedef SVMWorker<value_type> svm_worker_t;
-    const MAT* feat_mat; // n \times d // remem: * feat_mat is equivalent to &X
+    const MAT* feat_mat; // n \times d
     const csc_t* Y;      // n \times L
     const csc_t* C;      // L \times k: NULL to denote the pure Multi-label setting
     const csc_t* M;      // n \times k: NULL to denote the pure Multi-label setting
     const csc_t* R;      // n \times L: NULL to denote NOT-USING the relevance value for cost-sensitive learning
+    const csc_t* W;      // d \times L
     size_t code;         // code idx in C (i.e., column index of C)
     size_t subcode;      // index of the label with code (i.e. column index of Y or row index of C)
     const SVMParameter *param_ptr;
@@ -701,6 +684,7 @@ struct SVMJob {
         const csc_t* C,
         const csc_t* M,
         const csc_t* R,
+        const csc_t* W,
         size_t code,
         size_t subcode,
         const SVMParameter *param_ptr=NULL
@@ -710,14 +694,15 @@ struct SVMJob {
         C(C),
         M(M),
         R(R),
+        W(W),
         code(code),
         subcode(subcode),
         param_ptr(param_ptr) { }
 
-    void init_worker(svm_worker_t& worker, csc_t* w=NULL) const { // remem!!! w needs default NULL to accomodate multilabel_train_with_codes
+    void init_worker(svm_worker_t& worker) const {
         size_t w_size = feat_mat->cols;
         size_t y_size = feat_mat->rows;
-        worker.lazy_init(w_size, y_size, param_ptr, subcode, w); // if condition, if W, b is None, go here, else call worker.warm_start_init
+        worker.lazy_init(w_size, y_size, param_ptr, subcode, W);
 
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
@@ -725,8 +710,8 @@ struct SVMJob {
         worker.index.clear();
         if(M != NULL) {
             // multi-label setting with codes for labels
-            const auto& m_c = M->get_col(code); // remem: m_c: sparse vector of M's column
-            for(size_t idx = 0; idx < m_c.nnz; idx++) { // remem: take nnz column for negative sampling
+            const auto& m_c = M->get_col(code);
+            for(size_t idx = 0; idx < m_c.nnz; idx++) {
                 size_t i = m_c.idx[idx];
                 worker.index.push_back(i);
                 worker.inst_info[i].y = -1;
@@ -766,19 +751,19 @@ struct SVMJob {
      * Store *max_nonzeros* parameters with the absolute value >= *threshold* into  *coo_model*
      * */
     void solve(svm_worker_t& worker, coo_t& coo_model, double threshold=0.0, uint32_t max_nonzeros=0) const {
-        worker.solve(*feat_mat, 0, subcode); // remem put seed s 0, take subcode for printing it (to know the order of w)
+        worker.solve(*feat_mat, 0, subcode);
         if(max_nonzeros == 0) {
             for(size_t i = 0; i < worker.w_size; i++) {
                 coo_model.push_back(i, subcode, worker.w[i], threshold);
-            } // remem: coo_model is W and b
+            }
             if(param_ptr->bias > 0) {
                 coo_model.push_back(worker.w_size, subcode, worker.b, threshold);
             }
         } else { // max_nonzeros >= 1
             auto feat_index = worker.feat_index;
-            feat_index.clear(); // remem: reseting
+            feat_index.clear();
             for(size_t i = 0; i < worker.w_size; i++) {
-                if(fabs(worker.w[i]) >= threshold) { // remem: only want sparse W so preserve large weight
+                if(fabs(worker.w[i]) >= threshold) {
                     feat_index.push_back(i);
                 }
             }
@@ -841,11 +826,10 @@ struct SVMJob {
 // C: shape of L \times K, the label-to-cluster matrix for selecting inst/labels within same cluster
 // M: shape of N \times K, the instance-to-cluster matrix for negative sampling
 // R: shape of N \times L, the relevance matrix for cost-sensitive learning
+// W: shape of D \times L, the weight matrix for fine tune
 // Note that we assume Y and R has the same nonzero patterns (same indices and indptr),
 // which is verified in the (pecos.xmc.base) MLProblem constructor.
 // See more details in Eq. (10) of PECOS arxiv paper (Yu et. al., 2020)
-// remem: What is C: decide which class belongs to the cluster, positive. What is M: negative
-// remem: want max nonzero => want sparse
 template<class MAT>
 void multilabel_train_with_codes(
     const MAT* feat_mat,
@@ -857,74 +841,8 @@ void multilabel_train_with_codes(
     double threshold,
     uint32_t max_nonzeros_per_label,
     SVMParameter *param,
-    int threads
-) {
-    typedef typename MAT::value_type value_type;
-    typedef SVMJob<MAT, value_type> svm_job_t;
-    typedef typename svm_job_t::svm_worker_t svm_worker_t;
-
-    size_t w_size = feat_mat->cols;
-    size_t y_size = feat_mat->rows;
-    size_t nr_labels = Y->cols;
-
-    threads = set_threads(threads);
-    std::vector<svm_worker_t> worker_set(threads);
-    std::vector<coo_t> model_set(threads);
-
-#pragma omp parallel for schedule(static, 1)
-    for(int tid = 0; tid < threads; tid++) {
-        worker_set[tid].init(w_size, y_size, param);
-        model_set[tid].reshape(w_size + (param->bias > 0), nr_labels);
-    }
-
-    std::vector<svm_job_t> job_queue;
-    if(C != NULL && M != NULL) {
-        size_t code_size = C->cols;
-        for(size_t code = 0; code < code_size; code++) {
-            const auto& C_code = C->get_col(code);
-            for(size_t idx = 0; idx < C_code.nnz; idx++) {
-                size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
-            }
-        }
-    } else {
-        // either C == NULL or M == NULL
-        // pure multi-label setting
-        for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
-        }
-    }
-#pragma omp parallel for schedule(dynamic, 1)
-    for(size_t job_id = 0; job_id < job_queue.size(); job_id++) {
-        int tid = omp_get_thread_num();
-        auto& worker = worker_set[tid];
-        auto& local_model = model_set[tid];
-        const auto& job = job_queue[job_id];
-        job.init_worker(worker);
-        job.solve(worker, local_model, threshold, max_nonzeros_per_label);
-        job.reset_worker(worker);
-    }
-    model->reshape(w_size + (param->bias > 0), nr_labels);
-    model->swap(model_set[0]);
-    for(int tid = 1; tid < threads; tid++) {
-        model->extends(model_set[tid]);
-    }
-}
-
-// remem
-template<class MAT>
-void multilabel_fine_tune_with_codes(
-    const MAT* feat_mat,
-    const csc_t *Y,
-    const csc_t *C,
-    const csc_t *M,
-    const csc_t *R,
-    coo_t *model,
-    double threshold,
-    uint32_t max_nonzeros_per_label,
-    SVMParameter *param,
     int threads,
-    csc_t *W
+    const csc_t *W
 ) {
     typedef typename MAT::value_type value_type;
     typedef SVMJob<MAT, value_type> svm_job_t;
@@ -958,7 +876,6 @@ void multilabel_fine_tune_with_codes(
     //     // }
     // }
     // printf("b = ", b);
-
     std::vector<svm_job_t> job_queue;
     if(C != NULL && M != NULL) {
         size_t code_size = C->cols;
@@ -966,14 +883,14 @@ void multilabel_fine_tune_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param)); // can input W becuz num of W's column is the same as Y, but SVMJob has subcode, so no need to pass W, but use subcode to get W
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param)); // can input W becuz num of W's column is the same as Y, but SVMJob has subcode, so no need to pass W, but use subcode to get W
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param)); // can input W becuz num of W's column is the same as Y
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param)); // can input W becuz num of W's column is the same as Y
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)
@@ -982,7 +899,7 @@ void multilabel_fine_tune_with_codes(
         auto& worker = worker_set[tid];
         auto& local_model = model_set[tid];
         const auto& job = job_queue[job_id];
-        job.init_worker(worker, W); // has subcode in job, so can get W's column there
+        job.init_worker(worker); // has subcode in job, so can get W's column there
         job.solve(worker, local_model, threshold, max_nonzeros_per_label);
         job.reset_worker(worker);
     }
