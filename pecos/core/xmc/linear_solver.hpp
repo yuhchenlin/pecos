@@ -442,17 +442,17 @@ struct SVMWorker {
         // b = 0;
         newton_obj.newton(curr_w, b);
         // Last w
-        // for (uint64_t i = 0; i < w_size; i++) {
-        //     printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
-        // }
-        // printf("b = ", b);
+        for (uint64_t i = 0; i < w_size; i++) {
+            printf("subcode: %d, w[%d] = %f\n", subcode, i, w[i]);
+        }
+        printf("b = ", b);
     }
 
     template<typename MAT>
     void solve_l2r_l1l2_svc(const MAT& X, int seed) {
         dvec_wrapper_t curr_w(w);
         rng_t rng(seed);
-        // TODO
+
         for(size_t j = 0; j < w_size; j++) {
             curr_w[j] = 0;
         }
@@ -725,7 +725,7 @@ struct SVMJob {
                 worker.inst_info[i].cost = 1.0;
             }
         }
-        const auto& y_s = Y->get_col(subcode); // positive samples
+        const auto& y_s = Y->get_col(subcode);
         for(size_t idx = 0; idx < y_s.nnz; idx++) {
             size_t i = y_s.idx[idx];
             worker.inst_info[i].y = +1;
@@ -883,14 +883,14 @@ void multilabel_train_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param)); // can input W becuz num of W's column is the same as Y, but SVMJob has subcode, so no need to pass W, but use subcode to get W
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param));
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param)); // can input W becuz num of W's column is the same as Y
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param));
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)
@@ -899,7 +899,7 @@ void multilabel_train_with_codes(
         auto& worker = worker_set[tid];
         auto& local_model = model_set[tid];
         const auto& job = job_queue[job_id];
-        job.init_worker(worker); // has subcode in job, so can get W's column there
+        job.init_worker(worker);
         job.solve(worker, local_model, threshold, max_nonzeros_per_label);
         job.reset_worker(worker);
     }

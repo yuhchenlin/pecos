@@ -460,14 +460,13 @@ class PostProcessor(object):
 
 
 class MLProblem(object):
-    """Object containing the X, Y, C, M, R and W matrices that defines a Multi-Label(ML) problem.
+    """Object containing the X, Y, C, M, and R matrices that defines a Multi-Label(ML) problem.
 
     Creates M from Y*C if not given with multi-threading sparse_matmul.
     Y: shape of N by L, the instance-to-label matrix with binary classification signals
     C: shape of L by K, the label-to-cluster matrix for selecting inst/labels within same cluster
     M: shape of N by K, the instance-to-cluster matrix for negative sampling
     R: shape of N by L, the relevance matrix for cost-sensitive learning
-    W: shape of D by L, the weight matrix of trained model for fine tuning
 
     See more details in Section 3.3.2 of PECOS paper (Yu et al., 2020).
 
@@ -476,7 +475,7 @@ class MLProblem(object):
         https://arxiv.org/abs/2010.05878
     """
 
-    def __init__(self, X, Y, C=None, M=None, R=None, W=None, threads=8):
+    def __init__(self, X, Y, C=None, M=None, R=None, threads=8):
         """Initialization
 
         Args:
@@ -487,8 +486,6 @@ class MLProblem(object):
             M (csc_matrix, np.ndarray or ScipyCscF32, optional): Instance-to-cluster matrix.
                 If not given, creates M from Y*C with multi-threading sparse_matmul.
             R (csc_matrix, np.ndarray or ScipyCscF32, optional): Relevance matrix.
-                If not given, will use None.
-            W (csc_matrix, np.ndarray or ScipyCscF32, optional): Weight matrix.
                 If not given, will use None.
             threads(int, optional): Number of threads for multi-threading. Default to 8.
         """
@@ -520,11 +517,6 @@ class MLProblem(object):
             # verify relevance scores are non negative
             if not all(R.data >= 0):
                 raise ValueError("Invalid relevance matrix: got value < 0")
-
-        if W is not None:
-            self.pW = ScipyCscF32.init_from(W)
-        else:
-            self.pW = None
 
         new_C = (
             smat.csc_matrix(np.ones((Y.shape[1], 1), dtype=dtype))
@@ -776,11 +768,12 @@ class MLModel(pecos.BaseClass):
         smat_util.save_matrix("{}/C.npz".format(folder), self.C)
 
     @classmethod
-    def train(cls, prob, train_params=None, pred_params=None, **kwargs):
+    def train(cls, prob, W=None, train_params=None, pred_params=None, **kwargs):
         """Training method for MLModel
 
         Args:
             prob (MLProblem): the problem to solve
+            W (W from MLModel): the weight matrix from trained MLModel for fine tune
             train_params (TrainParams, optional): instance of TrainParams
             pred_params (PredParams, optional): instance of PredParams
             **kwargs: for backward compatibility of old training interface
@@ -798,6 +791,21 @@ class MLModel(pecos.BaseClass):
         if not pred_params.is_valid():
             raise ValueError("pred_params is not valid!")
 
+        if W is not None:
+            # Currently model fine-tuning only support using L2R_L2LOSS_SVC_PRIMAL
+            # Assuming using newton_eps in train_params
+            if train_params.solver_type != "L2R_L2LOSS_SVC_PRIMAL":
+                raise ValueError("Currently only support using L2R_L2LOSS_SVC_PRIMAL.")
+
+            # Assert X and Y dimensions are valid
+            assert (
+                prob.X.shape[1] + (train_params.bias > 0) == W.shape[0]
+            ), f"X.shape[1] = {prob.X.shape[1] + (train_params.bias > 0)} != {W.shape[0]} = W.shape[0]"
+            assert (
+                prob.Y.shape[1] == W.shape[1]
+            ), f"prob.Y.shape[1] = {prob.Y.shape[1]} != {W.shape[1]} = W.shape[1]"
+
+            W = ScipyCscF32.init_from(W)
         # Assuming using newton_eps in train_params
         if train_params.solver_type == "L2R_L2LOSS_SVC_PRIMAL":
             train_params.eps = train_params.newton_eps
@@ -808,6 +816,7 @@ class MLModel(pecos.BaseClass):
             prob.pC,
             prob.pM,
             prob.pR,
+            W,
             **train_params.to_dict(),
         )
         return cls(model, prob.pC, train_params.bias, pred_params)
@@ -825,46 +834,8 @@ class MLModel(pecos.BaseClass):
         Returns:
             MLModel: the trained MLModel
         """
-        if train_params is None:  # for backward compatibility
-            train_params = kwargs
-        train_params = self.TrainParams.from_dict(train_params)
 
-        pred_params = self.PredParams.from_dict(pred_params)
-        pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-        if not pred_params.is_valid():
-            raise ValueError("pred_params is not valid!")
-
-        # Currently model fine-tuning only support using L2R_L2LOSS_SVC_PRIMAL
-        # Assuming using newton_eps in train_params
-        if train_params.solver_type == "L2R_L2LOSS_SVC_PRIMAL":
-            train_params.eps = train_params.newton_eps
-        else:
-            raise ValueError("Currently only support using L2R_L2LOSS_SVC_PRIMAL.")
-
-        # Assert X and Y dimensions are valid
-        assert (
-            prob.X.shape[1] + (train_params.bias > 0) == self.W.shape[0]
-        ), f"X.shape[1] = {prob.X.shape[1] + (train_params.bias > 0)} != {self.W.shape[0]} = self.W.shape[0]"
-        assert (
-            prob.Y.shape[1] == self.W.shape[1]
-        ), f"prob.Y.shape[1] = {prob.Y.shape[1]} != {self.W.shape[1]} = self.W.shape[1]"
-
-        # Assert prob.pC is identical to self.C from loaded model
-        if not np.array_equal(prob.pC.buf.indptr, self.C.indptr):
-            raise ValueError("Invalid relevance matrix: prob.pC.indptr != self.C.indptr")
-        if not np.array_equal(prob.pC.buf.indices, self.C.indices):
-            raise ValueError("Invalid relevance matrix: prob.pC.indices != self.C.indices")
-
-        model = clib.xlinear_single_layer_train(
-            prob.pX,
-            prob.pY,
-            prob.pC,
-            prob.pM,
-            prob.pR,
-            prob.pW,
-            **train_params.to_dict(),
-        )
-        return MLModel(model, prob.pC, train_params.bias, pred_params)
+        return MLModel.train(prob, self.W, train_params, pred_params, **kwargs)
 
     def get_pred_params(self):
         """Return a deep copy of prediction parameters
@@ -1359,6 +1330,7 @@ class HierarchicalMLModel(pecos.BaseClass):
     def train(
         cls,
         prob,
+        model=None,
         clustering=None,
         relevance_chain=None,
         matching_chain=None,
@@ -1370,6 +1342,7 @@ class HierarchicalMLModel(pecos.BaseClass):
 
         Args:
             prob (MLProblem): the problem to solve
+            model (list of model_chain): the model_chain from HierarchicalMLModel
             clustering (ClusterChain or None, optional): cluster chain for the model hierarchy
                 Default None for the One-Versus-All problem.
             relevance_chain (list of spmatrix): the relevance_chain for cost sensitive learning.
@@ -1417,7 +1390,8 @@ class HierarchicalMLModel(pecos.BaseClass):
             return HierarchicalMLModel([ml_model], pred_params=pred_params, is_predict_only=False)
 
         # assert cluster chain in clustering is valid
-        clustering = ClusterChain(clustering)
+        if not model:
+            clustering = ClusterChain(clustering)
         assert clustering[-1].shape[0] == prob.nr_labels
         depth = len(clustering)
 
@@ -1506,9 +1480,17 @@ class HierarchicalMLModel(pecos.BaseClass):
                     M += smat_util.binarized(M_pred)
 
             cur_prob = MLProblem(cur_prob.pX, Y, R=R, C=C, M=M, threads=matmul_threads)
-            cur_model = MLModel.train(
-                cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
-            )
+            if not model:
+                cur_model = MLModel.train(
+                    cur_prob, train_params=cur_train_params, pred_params=cur_pred_params
+                )
+            else:
+                mlmodel = model[t]
+                cur_model = mlmodel.fine_tune(
+                    cur_prob,
+                    train_params=cur_train_params,
+                    pred_params=cur_pred_params,
+                )
             model_chain.append(cur_model)
         return cls(model_chain, pred_params=pred_params, is_predict_only=False)
 
@@ -1544,98 +1526,16 @@ class HierarchicalMLModel(pecos.BaseClass):
             HierarchicalMLModel: the trained HierarchicalMLModel
         """
 
-        # remem: call train here
-
-        # assert cluster chain in clustering is valid
-        assert clustering[-1].shape[0] == prob.nr_labels
-        depth = len(clustering)
-
-        # construct train_params
-        if train_params is None:  # for backward compatibility
-            train_params = self.TrainParams(
-                neg_mining_chain=tuple(
-                    [kwargs.get("negative_sampling_scheme", "tfn") for _ in range(depth)]
-                ),
-                model_chain=tuple([MLModel.TrainParams.from_dict(kwargs) for _ in range(depth)]),
-            )
-        else:
-            train_params = self.TrainParams.from_dict(train_params)
-            train_params = self._duplicate_fields_with_name_ending_with_chain(
-                train_params, self.TrainParams, depth
-            )
-        train_params.neg_mining_chain = [ns.lower() for ns in train_params.neg_mining_chain]
-
-        # construct pred_params
-        if pred_params is None:
-            pred_params = self.PredParams(
-                model_chain=tuple([MLModel.PredParams() for _ in range(depth)])
-            )
-        else:
-            pred_params = self.PredParams.from_dict(pred_params)
-            pred_params = self._duplicate_fields_with_name_ending_with_chain(
-                pred_params, self.PredParams, depth
-            )
-        pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-
-        # construct Y_chain
-        # avoid large matmul_threads to prevent overhead in Y.dot(C) and save memory
-        matmul_threads = train_params.model_chain[0].threads
-        if matmul_threads <= 0:
-            matmul_threads = max(os.cpu_count(), matmul_threads)
-        matmul_threads = min(32, matmul_threads)
-        Y_chain = [prob.Y]
-        for C in reversed(clustering[1:]):
-            Y_t = clib.sparse_matmul(Y_chain[-1], C, threads=matmul_threads).tocsc()
-            Y_chain.append(Y_t)
-        Y_chain.reverse()
-
-        cur_prob, M_pred = prob, None
-        model_chain = []
-        for t, (Y, C, R, M_usn) in enumerate(
-            zip(Y_chain, clustering, relevance_chain, matching_chain)
-        ):
-            negative_sampling_scheme = train_params.neg_mining_chain[t]
-            cur_train_params = train_params.model_chain[t]
-            cur_pred_params = pred_params.model_chain[t]
-            LOGGER.info(
-                f"Training Layer {t} of {len(Y_chain)} Layers in HierarchicalMLModel, neg_mining={negative_sampling_scheme}.."
-            )
-            if t == 0:
-                M = None
-                # if got partial chain, enter hierarchical ranker mode
-                if C.shape[1] > 1:
-                    shape = (cur_prob.Y.shape[0], C.shape[1])
-                    M = smat.csc_matrix(shape, dtype=cur_prob.Y.dtype)
-                    if "usn" in negative_sampling_scheme:
-                        if M_usn is not None:
-                            M += smat_util.binarized(M_usn)
-                    if "tfn" in negative_sampling_scheme:
-                        M_true = clib.sparse_matmul(Y, C, threads=matmul_threads).tocsc()
-                        M += smat_util.binarized(M_true)
-            else:
-                # Preparing negative sampling for M
-                shape = (cur_prob.Y.shape[0], C.shape[1])
-                M = smat.csc_matrix(shape, dtype=cur_prob.Y.dtype)
-                if "usn" in negative_sampling_scheme:
-                    if M_usn is not None:
-                        M += smat_util.binarized(M_usn)
-                if "tfn" in negative_sampling_scheme:
-                    M_true = Y_chain[t - 1].tocsc()
-                    M += smat_util.binarized(M_true)
-                if any("man" in ns for ns in train_params.neg_mining_chain[t:]):
-                    M_pred = model_chain[-1].predict(cur_prob.pX, csr_codes=M_pred)
-                if "man" in negative_sampling_scheme:
-                    M += smat_util.binarized(M_pred)
-
-            mlmodel = self.model_chain[t]
-            cur_prob = MLProblem(cur_prob.pX, Y, R=R, C=C, M=M, W=mlmodel.W, threads=matmul_threads)
-            cur_model = mlmodel.fine_tune(
-                cur_prob,
-                train_params=cur_train_params,
-                pred_params=cur_pred_params,
-            )
-            model_chain.append(cur_model)
-        return HierarchicalMLModel(model_chain, pred_params=pred_params, is_predict_only=False)
+        return HierarchicalMLModel.train(
+            prob,
+            self.model_chain,
+            clustering,
+            relevance_chain,
+            matching_chain,
+            train_params,
+            pred_params,
+            **kwargs,
+        )
 
     def get_pred_params(self):
         return copy.deepcopy(self.pred_params)
