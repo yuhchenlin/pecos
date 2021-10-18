@@ -329,59 +329,55 @@ def test_consistency_of_warm_start(tmpdir):
     # test Python API
     from pecos.xmc import MLProblem, MLModel
 
-    train_X_file = "test/tst-data/xmc/xlinear/X.npz"
-    train_Y_file = "test/tst-data/xmc/xlinear/Y.npz"
-
-    X = smat_util.load_matrix(train_X_file)
+    X = smat_util.load_matrix(train_sX_file)
     Y = smat_util.load_matrix(train_Y_file)
+    Xt = smat_util.load_matrix(test_sX_file)
+    true_Yt_pred = smat_util.load_matrix(true_Y_pred_file)
 
     # test MLModel
     model_v0 = MLModel.train(
-        MLProblem(X, Y, C=None, M=None, R=None),
-        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL"),
+        MLProblem(X, Y, C=None, R=None),
+        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL", threshold=0.0),
     )
 
-    model_v1 = model_v0.fine_tune(
-        MLProblem(X, Y, C=None, M=None),
-        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL"),
+    model_v0.fine_tune(
+        MLProblem(X, Y, M=None, R=None),
+        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL", threshold=0.0),
     )
 
-    model_v2 = model_v0.fine_tune(
-        MLProblem(X, Y, C=None, M=None),
-        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL"),
-    )
-    assert model_v1.W.todense() == approx(model_v2.W.todense(), abs=1e-9)
+    Yt_pred = model_v0.predict(Xt)
+    assert Yt_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
 
     # test XLinearModel
     # test data has one positve label per instance
     from pecos.xmc.xlinear import XLinearModel
     from pecos.xmc import Indexer, LabelEmbeddingFactory
 
+    X = smat_util.load_matrix("test/tst-data/xmc/xlinear/X.npz")
+    Y = smat_util.load_matrix("test/tst-data/xmc/xlinear/Y.npz")
+    Xt = smat_util.load_matrix("test/tst-data/xmc/xlinear/Xt.npz")
+
     label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
-    cluster_chain = Indexer.gen(label_feat, max_leaf_size=2)
+    cluster_chain = Indexer.gen(label_feat)
+
     xlm_v0 = XLinearModel.train(
         X,
         Y,
         C=cluster_chain,
-        train_params={"solver_type": "L2R_L2LOSS_SVC_PRIMAL"},
-    )
-    xlm_v1 = xlm_v0.fine_tune(
-        X,
-        Y,
-        C=cluster_chain,
-        train_params={"hlm_args": {"model_chain": {"solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}},
-    )
-    xlm_v2 = xlm_v0.fine_tune(
-        X,
-        Y,
-        C=cluster_chain,
-        train_params={"hlm_args": {"model_chain": {"solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}},
+        R=None,
+        solver_type="L2R_L2LOSS_SVC_PRIMAL",
     )
 
-    for d in range(len(cluster_chain)):
-        assert xlm_v1.model.model_chain[d].W.todense() == approx(
-            xlm_v2.model.model_chain[d].W.todense()
-        )
+    xlm_v0.fine_tune(
+        X,
+        Y,
+        M=None,
+        R=None,
+        train_params={"hlm_args": {"model_chain": {"solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}},
+    )
+    Yt_pred = xlm_v0.predict(Xt)
+    true_Yt_pred = smat_util.load_matrix("test/tst-data/xmc/xlinear/Yt_primal_warm_start.npz")
+    assert Yt_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
 
 
 def test_consistency_of_primal(tmpdir):

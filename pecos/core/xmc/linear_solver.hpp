@@ -391,7 +391,7 @@ struct SVMWorker {
     }
 
     template<typename MAT>
-    void solve(const MAT& X, int seed=0, size_t subcode=NULL, const csc_t *W=NULL) {
+    void solve(const MAT& X, int seed=0) {
         // the solution will be available in w and b
         if(param.solver_type == L2R_L1LOSS_SVC_DUAL) {
             solve_l2r_l1l2_svc(X, seed);
@@ -400,33 +400,15 @@ struct SVMWorker {
         } else if(param.solver_type == L2R_LR_DUAL) {
             solve_l2r_lr(X, seed);
         } else if (param.solver_type == L2R_L2LOSS_SVC_PRIMAL) {
-            solve_l2r_l2_svc_primal(X, seed, subcode, W);
+            solve_l2r_l2_svc_primal(X, seed);
         }
     }
 
     template <typename MAT>
-    void solve_l2r_l2_svc_primal(const MAT &X, int seed, size_t subcode=NULL, const csc_t *W=NULL) {
+    void solve_l2r_l2_svc_primal(const MAT &X, int seed) {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
-        dvec_wrapper_t curr_w(w);
-        // re-initialize w and b
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
-
-        if (W!= NULL) {
-            const auto& W_col = W->get_col(subcode);
-            for (size_t idx = 0; idx < W_col.nnz; idx++) {
-                if (W_col.idx[idx] < w_size) {
-                    w[W_col.idx[idx]] = W_col.val[idx];
-                }
-                else {
-                    b = W_col.val[idx];
-                }
-            }
-        }
-
+        dvec_wrapper_t curr_w(w); // initialized in SVMJob
         newton_obj.newton(curr_w, b);
     }
 
@@ -686,6 +668,24 @@ struct SVMJob {
         size_t y_size = feat_mat->rows;
         worker.lazy_init(w_size, y_size, param_ptr);
 
+        if (W!= NULL) {
+            // re-initialize w and b
+            for(size_t j = 0; j < w_size; j++) {
+                worker.w[j] = 0;
+            }
+            worker.b = 0;
+
+            const auto& W_col = W->get_col(subcode);
+            for (size_t idx = 0; idx < W_col.nnz; idx++) {
+                if (W_col.idx[idx] < w_size) {
+                    worker.w[W_col.idx[idx]] = W_col.val[idx];
+                }
+                else {
+                    worker.b = W_col.val[idx];
+                }
+            }
+        }
+
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
         }
@@ -733,7 +733,7 @@ struct SVMJob {
      * Store *max_nonzeros* parameters with the absolute value >= *threshold* into  *coo_model*
      * */
     void solve(svm_worker_t& worker, coo_t& coo_model, double threshold=0.0, uint32_t max_nonzeros=0) const {
-        worker.solve(*feat_mat, 0, subcode, W);
+        worker.solve(*feat_mat);
         if(max_nonzeros == 0) {
             for(size_t i = 0; i < worker.w_size; i++) {
                 coo_model.push_back(i, subcode, worker.w[i], threshold);

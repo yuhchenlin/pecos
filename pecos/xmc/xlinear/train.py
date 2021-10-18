@@ -327,8 +327,8 @@ def do_train(args):
         if args.solver_type != "L2R_L2LOSS_SVC_PRIMAL":
             raise ValueError("Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
 
-        xlinear_model = XLinearModel.load(args.init_model_dir)
-        xlm = xlinear_model.fine_tune(
+        xlm = XLinearModel.load(args.init_model_dir)
+        xlm.fine_tune(
             X,
             Y,
             R=R,

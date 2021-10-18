@@ -158,10 +158,12 @@ class XLinearModel(pecos.BaseClass):
         return self.model.nr_labels
 
     @classmethod
-    def train(
+    def _train(
         cls,
         X,
         Y,
+        model=None,
+        clustering0=None,
         C=None,
         R=None,
         user_supplied_negatives=None,
@@ -174,6 +176,7 @@ class XLinearModel(pecos.BaseClass):
         Args:
             X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
             Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
+            model : If exists, the XLinear model will be used for fine tune.
             C (csc_matrix(float32), list/tuple of csc_matrices or ClusterChain, optional): indexer matrix or cluster chain.
                 Defaults to None
             R (csc_matrix(float32)): relevance matrix for cost sensitive learning. Default None.
@@ -208,29 +211,89 @@ class XLinearModel(pecos.BaseClass):
         if not train_params.min_codes:
             train_params.min_codes = train_params.nr_splits
 
-        if C is None or (isinstance(C, (list, tuple)) and len(C) == 0):
-            clustering = None
-            matching_chain = None
-            relevance_chain = None
-        else:
-            if train_params.shallow:
-                clustering = ClusterChain.from_partial_chain(C, min_codes=None)
+        if not model:
+            if C is None or (isinstance(C, (list, tuple)) and len(C) == 0):
+                clustering = None
+                matching_chain = None
+                relevance_chain = None
             else:
-                clustering = ClusterChain.from_partial_chain(
-                    C, min_codes=train_params.min_codes, nr_splits=train_params.nr_splits
-                )
-            matching_chain = clustering.generate_matching_chain(user_supplied_negatives)
+                if train_params.shallow:
+                    clustering = ClusterChain.from_partial_chain(C, min_codes=None)
+                else:
+                    clustering = ClusterChain.from_partial_chain(
+                        C, min_codes=train_params.min_codes, nr_splits=train_params.nr_splits
+                    )
+                matching_chain = clustering.generate_matching_chain(user_supplied_negatives)
+
+                if train_params.rel_mode == "disable":
+                    relevance_chain = [None] * len(clustering)
+                elif train_params.rel_mode == "induce":
+                    relevance_chain = clustering.generate_relevance_chain(
+                        {0: R if R is not None else smat_util.binarized(Y)},
+                        norm_type=train_params.rel_norm,
+                        induce=True,
+                    )
+                elif train_params.rel_mode == "ranker-only":
+                    relevance_chain = clustering.generate_relevance_chain(
+                        {0: R},
+                        norm_type=train_params.rel_norm,
+                        induce=False,
+                    )
+                else:
+                    raise ValueError(f"Wrong value for rel_mode: {train_params.rel_mode}")
+
+            if train_params.mode == "full-model":
+                pass
+            elif train_params.mode == "matcher":
+                if clustering is None:
+                    raise ValueError("Expect non-trivial clustering for matcher mode")
+                for cc in reversed(clustering[-train_params.ranker_level :]):
+                    Y = Y.dot(cc).tocsc()
+                clustering = ClusterChain(clustering[: -train_params.ranker_level])
+                matching_chain = matching_chain[: -train_params.ranker_level]
+                relevance_chain = relevance_chain[: -train_params.ranker_level]
+            elif train_params.mode == "ranker":
+                if clustering is None:
+                    raise ValueError("Expect non-trivial clustering for ranker mode")
+                clustering = ClusterChain(clustering[-train_params.ranker_level :])
+                matching_chain = matching_chain[-train_params.ranker_level :]
+                relevance_chain = relevance_chain[-train_params.ranker_level :]
+            else:
+                raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+
+            # include R in prob for OVA training
+            prob = MLProblem(X, Y, R=R if C is None else None)
+
+            model = HierarchicalMLModel.train(
+                prob,
+                clustering=clustering,
+                relevance_chain=relevance_chain,
+                matching_chain=matching_chain,
+                train_params=train_params.hlm_args,
+                pred_params=pred_params.hlm_args,
+                **kwargs,
+            )
+            return cls(model)
+
+        else:
+            # Fine tune only supports full-model
+            if train_params.mode == "full-model":
+                pass
+            else:
+                raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+
+            matching_chain = clustering0.generate_matching_chain(user_supplied_negatives)
 
             if train_params.rel_mode == "disable":
-                relevance_chain = [None] * len(clustering)
+                relevance_chain = [None] * len(clustering0)
             elif train_params.rel_mode == "induce":
-                relevance_chain = clustering.generate_relevance_chain(
+                relevance_chain = clustering0.generate_relevance_chain(
                     {0: R if R is not None else smat_util.binarized(Y)},
                     norm_type=train_params.rel_norm,
                     induce=True,
                 )
             elif train_params.rel_mode == "ranker-only":
-                relevance_chain = clustering.generate_relevance_chain(
+                relevance_chain = clustering0.generate_relevance_chain(
                     {0: R},
                     norm_type=train_params.rel_norm,
                     induce=False,
@@ -238,38 +301,61 @@ class XLinearModel(pecos.BaseClass):
             else:
                 raise ValueError(f"Wrong value for rel_mode: {train_params.rel_mode}")
 
-        if train_params.mode == "full-model":
-            pass
-        elif train_params.mode == "matcher":
-            if clustering is None:
-                raise ValueError("Expect non-trivial clustering for matcher mode")
-            for cc in reversed(clustering[-train_params.ranker_level :]):
-                Y = Y.dot(cc).tocsc()
-            clustering = ClusterChain(clustering[: -train_params.ranker_level])
-            matching_chain = matching_chain[: -train_params.ranker_level]
-            relevance_chain = relevance_chain[: -train_params.ranker_level]
-        elif train_params.mode == "ranker":
-            if clustering is None:
-                raise ValueError("Expect non-trivial clustering for ranker mode")
-            clustering = ClusterChain(clustering[-train_params.ranker_level :])
-            matching_chain = matching_chain[-train_params.ranker_level :]
-            relevance_chain = relevance_chain[-train_params.ranker_level :]
-        else:
-            raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
+            # include R in prob for OVA training
+            prob = MLProblem(X, Y, R=R)
+            model.fine_tune(
+                prob,
+                clustering=clustering0,
+                relevance_chain=relevance_chain,
+                matching_chain=matching_chain,
+                train_params=train_params.hlm_args,
+                pred_params=pred_params.hlm_args,
+                **kwargs,
+            )
 
-        # include R in prob for OVA training
-        prob = MLProblem(X, Y, R=R if C is None else None)
+    @classmethod
+    def train(
+        cls,
+        X,
+        Y,
+        C=None,
+        R=None,
+        user_supplied_negatives=None,
+        train_params=None,
+        pred_params=None,
+        **kwargs,
+    ):
+        """Training method for XLinearModel
 
-        model = HierarchicalMLModel.train(
-            prob,
-            clustering=clustering,
-            relevance_chain=relevance_chain,
-            matching_chain=matching_chain,
-            train_params=train_params.hlm_args,
-            pred_params=pred_params.hlm_args,
+        Args:
+            X (csr_matrix(float32) or ndarray(float32)): instance feature matrix of shape (nr_inst, nr_feat)
+            Y (csc_matrix(float32)): label matrix of shape (nr_inst, nr_labels)
+            C (csc_matrix(float32), list/tuple of csc_matrices or ClusterChain, optional): indexer matrix or cluster chain.
+                Defaults to None
+            R (csc_matrix(float32)): relevance matrix for cost sensitive learning. Default None.
+            user_supplied_negatives (dict, optional): dictionary of usn matching matrices.
+                See ClusterChain.generate_matching_chain. Defaults to None.
+            train_params (XLinearModel.TrainParams, optional): instance of XLinearModel.TrainParams
+            pred_params (XLinearModel.PredParams, optional): instance of XLinearModel.PredParams
+            kwargs:
+                {"beam_size": INT, "only_topk": INT, "post_processor": STR},
+                Default None to use HierarchicalMLModel.PredParams defaults
+
+        Returns:
+            XLinearModel: the trained XLinearModel
+        """
+
+        return XLinearModel._train(
+            X=X,
+            Y=Y,
+            model=None,
+            C=C,
+            R=R,
+            user_supplied_negatives=user_supplied_negatives,
+            train_params=train_params,
+            pred_params=pred_params,
             **kwargs,
         )
-        return cls(model)
 
     def fine_tune(
         self,
@@ -298,63 +384,21 @@ class XLinearModel(pecos.BaseClass):
         Returns:
             XLinearModel: the trained XLinearModel
         """
-        if train_params is None:  # for backward compatibility
-            train_params = self.TrainParams.from_dict(kwargs)
-            train_params.hlm_args = HierarchicalMLModel.TrainParams(
-                neg_mining_chain=kwargs.get("negative_sampling_scheme", "tfn"),
-                model_chain=MLModel.TrainParams.from_dict(kwargs),
-            )
-        else:
-            train_params = self.TrainParams.from_dict(train_params)
 
-        if pred_params is None:
-            pred_params = self.PredParams()
-            pred_params.hlm_args = HierarchicalMLModel.PredParams(model_chain=MLModel.PredParams())
-        else:
-            pred_params = self.PredParams.from_dict(pred_params)
-        # we don't override pred_params with kwargs["pred_kwargs"] because model depth is unknown!
+        clustering0 = self.get_cluster_chain()
 
-        if not train_params.min_codes:
-            train_params.min_codes = train_params.nr_splits
-
-        # Fine tune only supports full-model
-        if train_params.mode == "full-model":
-            pass
-        else:
-            raise ValueError(f"Wrong value for the mode attribute: {train_params.mode}")
-
-        clustering = self.get_cluster_chain()
-        matching_chain = clustering.generate_matching_chain(user_supplied_negatives)
-
-        if train_params.rel_mode == "disable":
-            relevance_chain = [None] * len(clustering)
-        elif train_params.rel_mode == "induce":
-            relevance_chain = clustering.generate_relevance_chain(
-                {0: R if R is not None else smat_util.binarized(Y)},
-                norm_type=train_params.rel_norm,
-                induce=True,
-            )
-        elif train_params.rel_mode == "ranker-only":
-            relevance_chain = clustering.generate_relevance_chain(
-                {0: R},
-                norm_type=train_params.rel_norm,
-                induce=False,
-            )
-        else:
-            raise ValueError(f"Wrong value for rel_mode: {train_params.rel_mode}")
-
-        # include R in prob for OVA training
-        prob = MLProblem(X, Y, R=R)
-        self.model.fine_tune(
-            prob,
-            clustering=clustering,
-            relevance_chain=relevance_chain,
-            matching_chain=matching_chain,
-            train_params=train_params.hlm_args,
-            pred_params=pred_params.hlm_args,
+        XLinearModel._train(
+            X=X,
+            Y=Y,
+            model=self.model,
+            clustering0=clustering0,
+            C=None,
+            R=R,
+            user_supplied_negatives=user_supplied_negatives,
+            train_params=train_params,
+            pred_params=pred_params,
             **kwargs,
         )
-        return self
 
     def set_output_constraint(self, labels_to_keep):
         """
