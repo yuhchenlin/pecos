@@ -67,6 +67,7 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
     std::vector<int> I;
     int sizeI;
     const SVMParameter *param;
+
     const MAT &X;
     WORKER *worker;
 
@@ -407,12 +408,7 @@ struct SVMWorker {
     void solve_l2r_l2_svc_primal(const MAT &X, int seed) {
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
-        dvec_wrapper_t curr_w(w);
-        // re-initialize w and b
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
+        dvec_wrapper_t curr_w(w); // initialized in SVMJob
         newton_obj.newton(curr_w, b);
     }
 
@@ -421,6 +417,7 @@ struct SVMWorker {
         dvec_wrapper_t curr_w(w);
         rng_t rng(seed);
 
+        // Still need to reset to 0, since dual doesn't support warm start yet
         for(size_t j = 0; j < w_size; j++) {
             curr_w[j] = 0;
         }
@@ -641,6 +638,7 @@ struct SVMJob {
     const csc_t* C;      // L \times k: NULL to denote the pure Multi-label setting
     const csc_t* M;      // n \times k: NULL to denote the pure Multi-label setting
     const csc_t* R;      // n \times L: NULL to denote NOT-USING the relevance value for cost-sensitive learning
+    const csc_t* W;      // d \times L
     size_t code;         // code idx in C (i.e., column index of C)
     size_t subcode;      // index of the label with code (i.e. column index of Y or row index of C)
     const SVMParameter *param_ptr;
@@ -651,6 +649,7 @@ struct SVMJob {
         const csc_t* C,
         const csc_t* M,
         const csc_t* R,
+        const csc_t* W,
         size_t code,
         size_t subcode,
         const SVMParameter *param_ptr=NULL
@@ -660,6 +659,7 @@ struct SVMJob {
         C(C),
         M(M),
         R(R),
+        W(W),
         code(code),
         subcode(subcode),
         param_ptr(param_ptr) { }
@@ -668,6 +668,24 @@ struct SVMJob {
         size_t w_size = feat_mat->cols;
         size_t y_size = feat_mat->rows;
         worker.lazy_init(w_size, y_size, param_ptr);
+
+        // re-initialize w and b
+        for(size_t j = 0; j < w_size; j++) {
+            worker.w[j] = 0;
+        }
+        worker.b = 0;
+
+        if (W!= NULL) {
+            const auto& W_col = W->get_col(subcode);
+            for (size_t idx = 0; idx < W_col.nnz; idx++) {
+                if (W_col.idx[idx] < w_size) { // != w_size
+                    worker.w[W_col.idx[idx]] = W_col.val[idx];
+                }
+                else {
+                    worker.b = W_col.val[idx];
+                }
+            }
+        }
 
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
@@ -791,6 +809,7 @@ struct SVMJob {
 // C: shape of L \times K, the label-to-cluster matrix for selecting inst/labels within same cluster
 // M: shape of N \times K, the instance-to-cluster matrix for negative sampling
 // R: shape of N \times L, the relevance matrix for cost-sensitive learning
+// W: shape of D \times L, the weight matrix for fine tune
 // Note that we assume Y and R has the same nonzero patterns (same indices and indptr),
 // which is verified in the (pecos.xmc.base) MLProblem constructor.
 // See more details in Eq. (10) of PECOS arxiv paper (Yu et. al., 2020)
@@ -805,7 +824,8 @@ void multilabel_train_with_codes(
     double threshold,
     uint32_t max_nonzeros_per_label,
     SVMParameter *param,
-    int threads
+    int threads,
+    const csc_t *W
 ) {
     typedef typename MAT::value_type value_type;
     typedef SVMJob<MAT, value_type> svm_job_t;
@@ -832,14 +852,14 @@ void multilabel_train_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param));
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param));
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)

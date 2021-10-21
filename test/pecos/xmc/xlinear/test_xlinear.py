@@ -245,6 +245,141 @@ def test_predict_consistency_between_python_and_cpp(tmpdir):
                 ), f"model:{model} (dense, csc) post_processor:{pp}, inst:{i}"
 
 
+def test_consistency_of_warm_start(tmpdir):
+    import subprocess
+    import shlex
+    import numpy as np
+    from pecos.utils import smat_util
+
+    train_sX_file = "test/tst-data/xmc/xlinear/X.npz"
+    train_dX_file = str(tmpdir.join("X.trn.npy"))
+    train_Y_file = "test/tst-data/xmc/xlinear/Y.npz"
+    test_sX_file = "test/tst-data/xmc/xlinear/Xt.npz"
+    test_dX_file = str(tmpdir.join("X.tst.npy"))
+    test_Y_file = "test/tst-data/xmc/xlinear/Yt.npz"
+    true_Y_pred_file = "test/tst-data/xmc/xlinear/Yt_primal_warm_start.npz"
+    test_Y_pred_file = str(tmpdir.join("Yt_pred_test.npz"))
+    model_folder = str(tmpdir.join("save_model"))
+    model_folder_warm_start = str(tmpdir.join("save_model_warm_start"))
+    threshold = 0.0
+
+    np.save(train_dX_file, smat_util.load_matrix(train_sX_file).toarray(), allow_pickle=False)
+    np.save(test_dX_file, smat_util.load_matrix(test_sX_file).toarray(), allow_pickle=False)
+
+    for solver_type in ["L2R_L2LOSS_SVC_PRIMAL"]:
+        for train_X, test_X in [(train_sX_file, test_sX_file), (train_dX_file, test_dX_file)]:
+            # Training
+            cmd = []
+            cmd += ["python3 -m pecos.xmc.xlinear.train"]
+            cmd += ["-x {}".format(train_X)]
+            cmd += ["-y {}".format(train_Y_file)]
+            cmd += ["-m {}".format(model_folder)]
+            cmd += ["-s {}".format(solver_type)]
+            cmd += ["-t {}".format(threshold)]
+            process = subprocess.run(
+                shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            assert process.returncode == 0, " ".join(cmd)
+
+            # Warm start
+            cmd = []
+            cmd += ["python3 -m pecos.xmc.xlinear.train"]
+            cmd += ["-x {}".format(train_X)]
+            cmd += ["-y {}".format(train_Y_file)]
+            cmd += ["-m {}".format(model_folder_warm_start)]
+            cmd += ["-s {}".format(solver_type)]
+            cmd += ["-t {}".format(threshold)]
+            cmd += ["--init-model-dir {}".format(model_folder)]
+            process = subprocess.run(
+                shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            assert process.returncode == 0, " ".join(cmd)
+
+            # Batch Inference
+            cmd = []
+            cmd += ["python3 -m pecos.xmc.xlinear.predict"]
+            cmd += ["-x {}".format(test_X)]
+            cmd += ["-y {}".format(test_Y_file)]
+            cmd += ["-o {}".format(test_Y_pred_file)]
+            cmd += ["-m {}".format(model_folder_warm_start)]
+            process = subprocess.run(
+                shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            assert process.returncode == 0, " ".join(cmd)
+            true_Yt_pred = smat_util.load_matrix(true_Y_pred_file)
+            Yt_pred = smat_util.load_matrix(test_Y_pred_file)
+            assert Yt_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
+
+            # Select Inference
+            cmd = []
+            cmd += ["python3 -m pecos.xmc.xlinear.predict"]
+            cmd += ["-x {}".format(test_X)]
+            cmd += ["-y {}".format(test_Y_file)]
+            cmd += ["-so {}".format(true_Y_pred_file)]
+            cmd += ["-o {}".format(test_Y_pred_file)]
+            cmd += ["-m {}".format(model_folder_warm_start)]
+            process = subprocess.run(
+                shlex.split(" ".join(cmd)), stdout=subprocess.PIPE, stderr=subprocess.PIPE
+            )
+            assert process.returncode == 0, " ".join(cmd)
+            true_Yt_pred = smat_util.load_matrix(true_Y_pred_file)
+            Yt_selected_pred = smat_util.load_matrix(test_Y_pred_file)
+            assert Yt_selected_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
+
+    # test Python API
+    from pecos.xmc import MLProblem, MLModel
+
+    X = smat_util.load_matrix(train_sX_file)
+    Y = smat_util.load_matrix(train_Y_file)
+    Xt = smat_util.load_matrix(test_sX_file)
+    true_Yt_pred = smat_util.load_matrix(true_Y_pred_file)
+
+    # test MLModel
+    model_v0 = MLModel.train(
+        MLProblem(X, Y, C=None, R=None),
+        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL", threshold=0.0),
+    )
+
+    model_v0.fine_tune(
+        MLProblem(X, Y, M=None, R=None),
+        train_params=MLModel.TrainParams(solver_type="L2R_L2LOSS_SVC_PRIMAL", threshold=0.0),
+    )
+
+    Yt_pred = model_v0.predict(Xt)
+    assert Yt_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
+
+    # test XLinearModel
+    # test data has one positve label per instance
+    from pecos.xmc.xlinear import XLinearModel
+    from pecos.xmc import Indexer, LabelEmbeddingFactory
+
+    X = smat_util.load_matrix("test/tst-data/xmc/xlinear/X.npz")
+    Y = smat_util.load_matrix("test/tst-data/xmc/xlinear/Y.npz")
+    Xt = smat_util.load_matrix("test/tst-data/xmc/xlinear/Xt.npz")
+
+    label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
+    cluster_chain = Indexer.gen(label_feat)
+
+    xlm_v0 = XLinearModel.train(
+        X,
+        Y,
+        C=cluster_chain,
+        R=None,
+        solver_type="L2R_L2LOSS_SVC_PRIMAL",
+    )
+
+    xlm_v0.fine_tune(
+        X,
+        Y,
+        M=None,
+        R=None,
+        train_params={"hlm_args": {"model_chain": {"solver_type": "L2R_L2LOSS_SVC_PRIMAL"}}},
+    )
+    Yt_pred = xlm_v0.predict(Xt)
+    true_Yt_pred = smat_util.load_matrix("test/tst-data/xmc/xlinear/Yt_primal_warm_start.npz")
+    assert Yt_pred.todense() == approx(true_Yt_pred.todense(), abs=1e-6)
+
+
 def test_consistency_of_primal(tmpdir):
     import subprocess
     import shlex
