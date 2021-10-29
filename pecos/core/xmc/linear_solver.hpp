@@ -42,6 +42,23 @@ enum SolverType {
     L2R_L2LOSS_SVC_PRIMAL = 2,
 }; /* solver_type */
 
+class StopW {
+    std::chrono::steady_clock::time_point time_begin;
+public:
+    StopW() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+    float getElapsedTimeMicro() {
+        std::chrono::steady_clock::time_point time_end = std::chrono::steady_clock::now();
+        return (std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_begin).count());
+    }
+
+    void reset() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+};
 
 // ===== SVM Solvers =====
 struct SVMParameter {
@@ -102,6 +119,7 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
     }
 
     double fun(dvec_wrapper_t w, value_type &b) {
+        StopW stopw1 = StopW();
         double f = 0;
         wTw = 0;
         Xv(w, wx, b);
@@ -116,10 +134,12 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
         }
 
         f = f + 0.5 * wTw;
+        std::cout << "cal fun, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
         return f;
     }
 
     double linesearch_and_update(double *f, double alpha, dvec_wrapper_t w, dvec_wrapper_t s, dvec_wrapper_t g, value_type &b, value_type &bs, value_type &bg) {
+        StopW stopw1 = StopW();
         double eta = 0.01;
         uint64_t n = get_w_size();
         int max_num_linesearch = 20;
@@ -159,18 +179,29 @@ struct l2r_erm_fun : public objective_function<MAT, value_type, WORKER> {
                 b = new_b;
             }
         }
+        std::cout << "linesearch, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
         return alpha;
     }
 
     void Xv(dvec_wrapper_t w, dvec_wrapper_t Xv, value_type &b) {
+        StopW stopw1 = StopW();
         const MAT &X = this->X;
         for (auto &i : this->worker->index) {
             const auto &xi = X.get_row(i);
-            Xv[i] = do_dot_product(w, xi);
+            // StopW stopw = StopW();
+            // printf("!!!");
+            // using do_dot_product 4th function:float32_t do_dot_product(const dense_vec_t<VX>& x, const sparse_vec_t<IY, VY>& y) {
+            Xv[i] = 0;
+            for(size_t s = 0; s < xi.nnz; s++) {
+                Xv[i] += w[xi.idx[s]] * xi.val[s];
+            }
+            // Xv[i] = do_dot_product(w, xi);
+            // std::cout << "Xv: do_dot_product, time(s) = " << stopw.getElapsedTimeMicro() * 1e-6 << "\n";
             if (param->bias > 0) {
                 Xv[i] += param->bias * b;
             }
         }
+        std::cout << "Xv, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 };
 
@@ -191,6 +222,7 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
     }
 
     void grad(dvec_wrapper_t w, dvec_wrapper_t G, value_type &b, value_type &bg) {
+        StopW stopw1 = StopW();
         this->sizeI = 0;
         for (auto &i : this->worker->index) {
             this->tmp[i] = this->wx[i] * this->worker->inst_info[i].y;
@@ -205,9 +237,13 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
         if (this->param->bias > 0) {
             bg = b + 2 * bg;
         }
+
+        std::cout << "grad, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
     void get_diag_preconditioner(dvec_wrapper_t M, value_type &bM) {
+        StopW stopw1 = StopW();
+
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
         for (uint64_t i = 0; i < w_size; i++) {
@@ -222,9 +258,12 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
                 bM += this->param->bias * this->param->bias * 2 * get_c(this->I[i]);
             }
         }
+        std::cout << "get_diag_preconditioner, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
     void Hv(dvec_wrapper_t s, dvec_wrapper_t Hs, value_type &bs, value_type &bHs) {
+        StopW stopw1 = StopW();
+
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
         for (uint64_t i = 0; i < w_size; i++) {
@@ -246,9 +285,13 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
         }
         do_xp2y(s, Hs);
         bHs = bs + 2 * bHs;
+
+        std::cout << "Hv, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
     double linesearch_and_update(double *f, double alpha, dvec_wrapper_t w, dvec_wrapper_t s, dvec_wrapper_t g, value_type &b, value_type &bs, value_type &bg) {
+        StopW stopw1 = StopW();
+
         double eta = 0.01;
         int max_num_linesearch = 20;
         double fold = *f;
@@ -292,11 +335,14 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
             b += alpha * bs;
         }
         this->wTw += alpha * alpha * sTs + 2 * alpha * wTs;
+
+        std::cout << "2nd linesearch, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
         return alpha;
     }
 
    protected:
     void subXTv(dvec_wrapper_t v, dvec_wrapper_t G, value_type &bg) {
+        StopW stopw1 = StopW();
         uint64_t w_size = this->worker->w_size;
         const MAT &X = this->X;
         for (size_t i = 0; i < w_size; i++) {
@@ -310,16 +356,22 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
                 bg += this->param->bias * v[i];
             }
         }
+
+        std::cout << "SubXTv, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
    private:
     double C_times_loss(int i, double wx_i) {
+        StopW stopw1 = StopW();
+
         double d = 1 - this->worker->inst_info[i].y * wx_i;
         if (d > 0) {
             return get_c(i) * d * d;
         } else {
             return 0;
         }
+
+        std::cout << "C_times_loss, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 };
 
@@ -406,14 +458,19 @@ struct SVMWorker {
 
     template <typename MAT>
     void solve_l2r_l2_svc_primal(const MAT &X, int seed) {
+        printf("y_size: %d\n", y_size);
+        printf("w_size: %d\n", w_size);
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w); // initialized in SVMJob
+        StopW stopw = StopW();
         newton_obj.newton(curr_w, b);
+        std::cout << "newton, total time(s) = " << stopw.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
     template<typename MAT>
     void solve_l2r_l1l2_svc(const MAT& X, int seed) {
+        StopW stopw = StopW();
         dvec_wrapper_t curr_w(w);
         rng_t rng(seed);
 
@@ -522,6 +579,7 @@ struct SVMWorker {
                 PGmin_old = -INF;
             }
         }
+        std::cout << "DUAL, total time(s) = " << stopw.getElapsedTimeMicro() * 1e-6 << "\n";
     }
 
     template<typename MAT>

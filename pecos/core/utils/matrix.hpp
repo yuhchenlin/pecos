@@ -610,6 +610,7 @@ namespace pecos {
     template<typename val_type>
     val_type do_dot_product(const val_type *x, const val_type *y, size_t size) {
         // This uses a BLAS implementation
+        // printf("1");
         val_type *xx = const_cast<val_type*>(x);
         val_type *yy = const_cast<val_type*>(y);
         ptrdiff_t inc = 1;
@@ -621,6 +622,7 @@ namespace pecos {
     float32_t do_dot_product(const sparse_vec_t<IX, VX>& x, const sparse_vec_t<IY, VY>& y) {
         // This function assume that nz entries in both x and y are stored in an
         // ascending order in terms of idx
+        // printf("2");
         if(x.nnz > y.nnz) { return do_dot_product(y, x); }
 
         //float64_t ret = 0;
@@ -644,6 +646,7 @@ namespace pecos {
 
     template<class VX, class VY>
     float32_t do_dot_product(const dense_vec_t<VX>& x, const dense_vec_t<VY>& y) {
+        // printf("do_dot_product, 3");
         float32_t ret = 0;
         for(size_t i = 0; i < x.len; i++) {
             ret += x[i] * y[i];
@@ -653,6 +656,7 @@ namespace pecos {
 
     template<class VX, class IY, class VY>
     float32_t do_dot_product(const dense_vec_t<VX>& x, const sparse_vec_t<IY, VY>& y) {
+        // printf("do_dot_product, 4");
         float32_t ret = 0;
         for(size_t s = 0; s < y.nnz; s++) {
             ret += x[y.idx[s]] * y.val[s];
@@ -662,6 +666,7 @@ namespace pecos {
 
     template<class IX, class VX, class VY>
     float32_t do_dot_product(const sparse_vec_t<IX, VX>& x, const dense_vec_t<VY>& y) {
+        // printf("5");
         return do_dot_product(y, x);
     }
 
@@ -699,6 +704,7 @@ namespace pecos {
     template<typename val_type, typename T>
     val_type* do_axpy(T alpha, const val_type *x, val_type *y, size_t size) {
         // This uses a BLAS implementation
+        // printf("blas");
         if(alpha == 0) { return y; }
         val_type alpha_ = (val_type)alpha;
         ptrdiff_t inc = 1;
@@ -710,6 +716,7 @@ namespace pecos {
 
     template<class VX, class VY, typename T>
     void do_axpy(T alpha, const dense_vec_t<VX>&x, dense_vec_t<VY>& y) {
+        // printf("dense, dense");
         for(size_t i = 0; i < x.len; i++) {
             y[i] += alpha * x[i];
         }
@@ -717,6 +724,7 @@ namespace pecos {
 
     template<class IX, class VX, class VY, typename T>
     void do_axpy(T alpha, const sparse_vec_t<IX, VX>&x, dense_vec_t<VY>& y) {
+        // printf("sparse, dense"); // here
         for(size_t s = 0; s < x.nnz; s++) {
             y[x.idx[s]] += alpha * x.val[s];
         }

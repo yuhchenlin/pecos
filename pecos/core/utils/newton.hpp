@@ -50,6 +50,24 @@ namespace pecos {
     //          https://github.com/cjlin1/liblinear/blob/master/newton.cpp
     //          https://github.com/cjlin1/liblinear/blob/master/linear.cpp
 
+    class StopW {
+    std::chrono::steady_clock::time_point time_begin;
+    public:
+    StopW() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+    float getElapsedTimeMicro() {
+        std::chrono::steady_clock::time_point time_end = std::chrono::steady_clock::now();
+        return (std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_begin).count());
+    }
+
+    void reset() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+    };
+
     template <typename MAT, typename value_type, typename WORKER>
     struct objective_function {
     public:
@@ -79,6 +97,7 @@ namespace pecos {
         int max_iter;
         objective_function<MAT, value_type, WORKER> *fun_obj;
         dvec_t tmp_w0, tmp_g, tmp_M, tmp_s, tmp_r;
+        int cg_iter;
 
         NEWTON(const objective_function<MAT, value_type, WORKER> *fun_obj, double eps_cg = 0.5, int max_iter = 1000) {
             this->fun_obj = const_cast<objective_function<MAT, value_type, WORKER> *>(fun_obj);
@@ -112,15 +131,28 @@ namespace pecos {
             value_type bM = 0;
             value_type bs = 0;
             value_type br = 0;
+            eps = 0.01; //hard code for test, remem:remove it
+            printf("eps = %f\n", eps);
+
             // calculate gradient norm at w=0 for stopping condition.
+            // StopW stopw1 = StopW();
             f = fun_obj->fun(w0, b0);
+            printf("f0:%f\n", f); // remem // first function value
+            // printf("b0:%f\n", b0);
+            // for (int i=0; i < w_size; i++){
+            //     printf("w0:%f\n", w0[i]);
+            // }
+            // std::cout << "cal fun, time(s) = " << stopw1.getElapsedTimeMicro() * 1e-6 << "\n";
+            // StopW stopw2 = StopW();
             fun_obj->grad(w0, g, b0, bg);
+            // std::cout << "cal grad2, time(s) = " << stopw2.getElapsedTimeMicro() * 1e-6 << "\n";
             double gnorm0 = norm(g, w_size, bg);
 
             f = fun_obj->fun(w, b);
             fun_obj->grad(w, g, b, bg);
             double gnorm = norm(g, w_size, bg);
-
+            
+            // StopW stopw3 = StopW();
             if (gnorm <= eps * gnorm0) {
                 search = 0;
             }
@@ -133,7 +165,7 @@ namespace pecos {
                 }
                 bM = (1 - alpha_pcg) + alpha_pcg * bM;
 
-                pcg(g, M, s, r, bg, bM, bs, br);
+                cg_iter = pcg(g, M, s, r, bg, bM, bs, br);
                 fold = f;
                 step_size = fun_obj->linesearch_and_update(&f, init_step_size, w, s, g, b, bs, bg);
                 if (step_size == 0) {
@@ -144,6 +176,8 @@ namespace pecos {
                 fun_obj->grad(w, g, b, bg);
                 gnorm = norm(g, w_size, bg);
                 if (gnorm <= eps * gnorm0) {
+                    // info("iter %2d f %f |g| %f CG %3d step_size %f \n", iter, f, gnorm, cg_iter, step_size);
+			        printf("iter %2d f %f |g| %f CG %3d step_size %f \n", iter, f, gnorm, cg_iter, step_size); // remem
                     break;
                 }
                 if (f < -1.0e+32) {
@@ -157,6 +191,7 @@ namespace pecos {
                 }
                 iter++;
             }
+            // std::cout << "while loop, time(s) = " << stopw3.getElapsedTimeMicro() * 1e-6 << "\n";
             if (iter >= max_iter){
                 printf("\nWARNING: reaching max number of Newton iterations\n");
                 }
