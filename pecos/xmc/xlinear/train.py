@@ -259,6 +259,14 @@ def parse_arguments():
         help="keep at most NONZEROS weight parameters per label in model(default 0 to denote nr_features + 1)",
     )
 
+    parser.add_argument(
+        "-mw",
+        "--init-model-dir",
+        type=str,
+        metavar="DIR",
+        help="path to the warm start model folder.",
+    )
+
     # Prediction kwargs
     parser.add_argument(
         "-k",
@@ -301,7 +309,7 @@ def parse_arguments():
 
 
 def do_train(args):
-    """Train and Save xlinear model
+    """Train and Save xlinear model, warm start is supported through fine_tune functions
 
     Args:
         args (argparse.Namespace): Command line arguments parsed by `parser.parse_args()`
@@ -356,16 +364,6 @@ def do_train(args):
     X = XLinearModel.load_feature_matrix(args.inst_path)
     Y = XLinearModel.load_label_matrix(args.label_path, for_training=True)
 
-    if args.code_path:
-        cluster_chain = ClusterChain.load(args.code_path)
-    else:
-        if args.label_feat_path:
-            label_feat = XLinearModel.load_feature_matrix(args.label_feat_path)
-        else:
-            label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
-
-        cluster_chain = Indexer.gen(label_feat, train_params=indexer_params)
-
     # load label importance matrix if given
     if args.usn_label_path:
         usn_label_mat = smat_util.load_matrix(args.usn_label_path)
@@ -389,16 +387,40 @@ def do_train(args):
         if getattr(args, kw, None) is not None:
             pred_kwargs[kw] = getattr(args, kw)
 
-    xlm = XLinearModel.train(
-        X,
-        Y,
-        C=cluster_chain,
-        R=R,
-        user_supplied_negatives=usn_match_dict,
-        train_params=train_params,
-        pred_params=pred_params,
-        pred_kwargs=pred_kwargs,
-    )
+    if args.init_model_dir:
+        # if args.solver_type != "L2R_L2LOSS_SVC_PRIMAL":
+        #     raise ValueError("Fine tune only supports using L2R_L2LOSS_SVC_PRIMAL.")
+        xlm = XLinearModel.load(args.init_model_dir)
+        xlm.fine_tune(
+            X,
+            Y,
+            R=R,
+            user_supplied_negatives=usn_match_dict,
+            train_params=train_params,
+            pred_params=pred_params,
+            pred_kwargs=pred_kwargs,
+        )
+    else:
+        if args.code_path:
+            cluster_chain = ClusterChain.load(args.code_path)
+        else:
+            if args.label_feat_path:
+                label_feat = XLinearModel.load_feature_matrix(args.label_feat_path)
+            else:
+                label_feat = LabelEmbeddingFactory.create(Y, X, method="pifa")
+
+            cluster_chain = Indexer.gen(label_feat, train_params=indexer_params)
+
+        xlm = XLinearModel.train(
+            X,
+            Y,
+            C=cluster_chain,
+            R=R,
+            user_supplied_negatives=usn_match_dict,
+            train_params=train_params,
+            pred_params=pred_params,
+            pred_kwargs=pred_kwargs,
+        )
 
     xlm.save(args.model_folder)
 

@@ -20,6 +20,7 @@
 #include "utils/parallel.hpp"
 #include "utils/random.hpp"
 #include "utils/newton.hpp"
+#include <chrono>
 
 namespace pecos {
 
@@ -42,6 +43,23 @@ enum SolverType {
     L2R_L2LOSS_SVC_PRIMAL = 2,
 }; /* solver_type */
 
+class StopW {
+    std::chrono::steady_clock::time_point time_begin;
+public:
+    StopW() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+    float getElapsedTimeMicro() {
+        std::chrono::steady_clock::time_point time_end = std::chrono::steady_clock::now();
+        return (std::chrono::duration_cast<std::chrono::microseconds>(time_end - time_begin).count());
+    }
+
+    void reset() {
+        time_begin = std::chrono::steady_clock::now();
+    }
+
+};
 
 // ===== SVM Solvers =====
 struct SVMParameter {
@@ -323,11 +341,12 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
 };
 
 #define INF HUGE_VAL
-template<class value_type>
+template<class value_type, class index_type>
 struct SVMWorker {
 
     typedef std::vector<value_type> dvec_t;
     typedef dense_vec_t<value_type> dvec_wrapper_t;
+    typedef sparse_vec_t<index_type, value_type> svec_wrapper_t; // remem
     typedef random_number_generator<> rng_t;
 
     struct InstInfo {
@@ -350,7 +369,10 @@ struct SVMWorker {
     value_type b; // bias parameter
     dvec_t QD;
     dvec_t alpha;
-    uint64_t w_size, y_size;
+    uint64_t w_size, y_size;  
+    svec_wrapper_t old_w;
+    value_type old_b;
+    dvec_t m0;
 
     SVMWorker(): w_size(0), y_size(0) {}
 
@@ -364,7 +386,10 @@ struct SVMWorker {
         inst_info.resize(y_size);
         b = 0;
         this->feat_index.reserve(this->w_size);
-        this->index.reserve(this->y_size);
+        this->index.reserve(this->y_size);    
+        // remem: warm start b is old_b, delta b is b
+        old_b = 0;
+        m0.resize(y_size, 0);
 
 
         if(param.solver_type == L2R_L2LOSS_SVC_DUAL) {
@@ -417,21 +442,23 @@ struct SVMWorker {
     }
 
     template<typename MAT>
-    void solve_l2r_l1l2_svc(const MAT& X, int seed) {
-        dvec_wrapper_t curr_w(w);
+    void solve_l2r_l1l2_svc(const MAT& X, int seed) {      
+        dvec_wrapper_t curr_w(w); // remem: dw after warm start
+        dvec_wrapper_t m(m0);
         rng_t rng(seed);
-
-        for(size_t j = 0; j < w_size; j++) {
-            curr_w[j] = 0;
-        }
-        b = 0;
 
         auto get_diag = [&](size_t i) {
             auto class_cost = (inst_info[i].y > 0) ? param.Cp : param.Cn;
+            if (old_w.nnz > 0) {
+                class_cost*=0.5;
+            } // remem
             return (param.solver_type == L2R_L2LOSS_SVC_DUAL)? (0.5 / (class_cost * inst_info[i].cost)) : 0.0;
         };
         auto get_upper_bound = [&](size_t i) {
             auto class_cost = (inst_info[i].y > 0) ? param.Cp : param.Cn;
+            if (old_w.nnz > 0) {
+                class_cost*=0.5;
+            } // remem
             return (param.solver_type == L2R_L2LOSS_SVC_DUAL)? INF : class_cost * inst_info[i].cost;
         };
 
@@ -453,6 +480,19 @@ struct SVMWorker {
 
         size_t active_size = index.size();
         size_t iter = 0;
+
+        // remem
+        // compute an additional term m for warm start
+        // change: remem: before shuffle, cal m 
+        for(size_t s = 0; s < active_size; s++) {
+            size_t i = index[s];
+            const signed char yi = inst_info[i].y;
+            const auto& xi = X.get_row(i);
+
+            m[i] = yi * (do_dot_product(old_w, xi));
+            m[i] += yi * old_b * param.bias; // old_b: warm start b: b*
+        }
+
         while(iter < param.max_iter) {
             PGmax_new = -INF;
             PGmin_new = INF;
@@ -461,12 +501,14 @@ struct SVMWorker {
             rng.shuffle(index.begin(), index.begin() + active_size);
 
             size_t s = 0;
+            int cnt = 0;
             for(s = 0; s < active_size; s++) {
+                cnt+=1;
                 size_t i = index[s];
                 const signed char yi = inst_info[i].y;
                 const auto& xi = X.get_row(i);
 
-                float64_t G = yi * (do_dot_product(curr_w, xi) + (param.bias > 0 ? b * param.bias : 0.0)) - 1;
+                float64_t G = yi * (do_dot_product(curr_w, xi) + (param.bias > 0 ? b * param.bias : 0.0)) - 1 + m[i]; // remem test:  + m[i]
                 float64_t C = get_upper_bound(i);
                 G += alpha[i] * get_diag(i);
 
@@ -504,8 +546,8 @@ struct SVMWorker {
                     b += (param.bias > 0 ? d * param.bias : 0);
                 }
             }
-
             iter++;
+
             if(PGmax_new - PGmin_new <= param.eps) {
                 if(active_size == index.size()) {
                     break;
@@ -525,6 +567,11 @@ struct SVMWorker {
                 PGmin_old = -INF;
             }
         }
+
+        for(size_t s = 0; s < old_w.nnz; s++) {
+            curr_w[old_w.idx[s]] += old_w.val[s];         
+        }
+        old_b += b;
     }
 
     template<typename MAT>
@@ -633,14 +680,15 @@ struct SVMWorker {
     }
 };
 
-template<class MAT, class value_type=float64_t>
+template<class MAT, class value_type=float64_t, class index_type=uint32_t>
 struct SVMJob {
-    typedef SVMWorker<value_type> svm_worker_t;
+    typedef SVMWorker<value_type, index_type> svm_worker_t;
     const MAT* feat_mat; // n \times d
     const csc_t* Y;      // n \times L
     const csc_t* C;      // L \times k: NULL to denote the pure Multi-label setting
     const csc_t* M;      // n \times k: NULL to denote the pure Multi-label setting
     const csc_t* R;      // n \times L: NULL to denote NOT-USING the relevance value for cost-sensitive learning
+    const csc_t* W;      // d \times L
     size_t code;         // code idx in C (i.e., column index of C)
     size_t subcode;      // index of the label with code (i.e. column index of Y or row index of C)
     const SVMParameter *param_ptr;
@@ -651,6 +699,7 @@ struct SVMJob {
         const csc_t* C,
         const csc_t* M,
         const csc_t* R,
+        const csc_t* W,
         size_t code,
         size_t subcode,
         const SVMParameter *param_ptr=NULL
@@ -660,6 +709,7 @@ struct SVMJob {
         C(C),
         M(M),
         R(R),
+        W(W),
         code(code),
         subcode(subcode),
         param_ptr(param_ptr) { }
@@ -668,6 +718,33 @@ struct SVMJob {
         size_t w_size = feat_mat->cols;
         size_t y_size = feat_mat->rows;
         worker.lazy_init(w_size, y_size, param_ptr);
+
+        // re-initialize w and b // remem
+        for(size_t j = 0; j < w_size; j++) {
+            worker.w[j] = 0;
+        }
+        worker.b = 0;
+        worker.old_b = 0; // remem
+
+        // remem: dual warm start: w* is sparse
+        // can also check if bias > 0
+        if (W!= NULL) {
+            worker.old_w = W->get_col(subcode);
+
+            const auto& W_col = W->get_col(subcode);
+            if (W_col.nnz>0 && W_col.idx[W_col.nnz-1] != w_size) {
+                worker.b = 0;
+            }
+            else {
+                if (W_col.nnz>0) {
+                    worker.old_w.nnz-=1;
+                    worker.b = W_col.val[W_col.nnz-1]; 
+                }     
+                else {
+                    worker.b = 0;
+                }           
+            }
+        }
 
         for(auto &i : worker.index) {
             worker.inst_info[i].clear();
@@ -733,7 +810,7 @@ struct SVMJob {
                 }
             }
 
-            if(feat_index.size() >= max_nonzeros) { // feat_index.size() >= 1
+            if(feat_index.size() >= max_nonzeros) {
                 struct comparator_by_absolute_value_t {
                     const float32_t *pred_val;
                     bool increasing;
@@ -791,6 +868,7 @@ struct SVMJob {
 // C: shape of L \times K, the label-to-cluster matrix for selecting inst/labels within same cluster
 // M: shape of N \times K, the instance-to-cluster matrix for negative sampling
 // R: shape of N \times L, the relevance matrix for cost-sensitive learning
+// W: shape of D \times L, the weight matrix for fine tune
 // Note that we assume Y and R has the same nonzero patterns (same indices and indptr),
 // which is verified in the (pecos.xmc.base) MLProblem constructor.
 // See more details in Eq. (10) of PECOS arxiv paper (Yu et. al., 2020)
@@ -805,7 +883,8 @@ void multilabel_train_with_codes(
     double threshold,
     uint32_t max_nonzeros_per_label,
     SVMParameter *param,
-    int threads
+    int threads,
+    const csc_t *W
 ) {
     typedef typename MAT::value_type value_type;
     typedef SVMJob<MAT, value_type> svm_job_t;
@@ -816,6 +895,7 @@ void multilabel_train_with_codes(
     size_t nr_labels = Y->cols;
 
     threads = set_threads(threads);
+    // printf("threads: %d\n", threads);
     std::vector<svm_worker_t> worker_set(threads);
     std::vector<coo_t> model_set(threads);
 
@@ -832,14 +912,14 @@ void multilabel_train_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param));
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param));
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)

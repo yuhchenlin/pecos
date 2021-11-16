@@ -980,6 +980,7 @@ class corelib(object):
         pC,
         pM,
         pR,
+        pW=None,
         threshold=0.1,
         max_nonzeros_per_label=None,
         solver_type="L2R_L2LOSS_SVC_DUAL",
@@ -1001,6 +1002,7 @@ class corelib(object):
             pC (ScipyCscF32): Single matrix from clustering chain, representing a hierarchical clustering.
             pM (ScipyCsrF32): Single matrix from matching chain.
             pR (ScipyCscF32): Relevance matrix for cost-sensitive learning, of shape (nr_inst, nr_labels).
+            pW (ScipyCscF32): Weight matrix from trained model for fine tune, of shape (nr_feat, nr_labels).
             threshold (float, optional): sparsify the final model by eliminating all entrees with abs value less than threshold.
                 Default to 0.1.
             max_nonzeros_per_label (int, optional): keep at most NONZEROS weight parameters per label in model.
@@ -1020,6 +1022,7 @@ class corelib(object):
         """
         clib = self.clib_float32
         coo_alloc = ScipyCoordinateSparseAllocator(dtype=np.float32)
+
         if isinstance(pX, ScipyCsrF32):
             c_xlinear_single_layer_train = clib.c_xlinear_single_layer_train_csr_f32
         elif isinstance(pX, ScipyDrmF32):
@@ -1043,6 +1046,7 @@ class corelib(object):
             eps,
             bias,
             threads,
+            byref(pW) if pW is not None else None,
         )
         return coo_alloc.tocsc().astype(np.float32)
 
