@@ -490,7 +490,7 @@ struct SVMWorker {
             const auto& xi = X.get_row(i);
 
             m[i] = yi * (do_dot_product(old_w, xi));
-            m[i] += yi * old_b * param.bias; // old_b: warm start b: b*
+            m[i] += yi * old_b * param.bias; // old_b: warm start b: b* // TODO: if param.bias < 0 (no bias)
         }
 
         while(iter < param.max_iter) {
@@ -571,7 +571,7 @@ struct SVMWorker {
         for(size_t s = 0; s < old_w.nnz; s++) {
             curr_w[old_w.idx[s]] += old_w.val[s];         
         }
-        old_b += b;
+        b += old_b;
     }
 
     template<typename MAT>
@@ -733,15 +733,15 @@ struct SVMJob {
 
             const auto& W_col = W->get_col(subcode);
             if (W_col.nnz>0 && W_col.idx[W_col.nnz-1] != w_size) {
-                worker.b = 0;
+                worker.old_b = 0;
             }
             else {
                 if (W_col.nnz>0) {
                     worker.old_w.nnz-=1;
-                    worker.b = W_col.val[W_col.nnz-1]; 
+                    worker.old_b = W_col.val[W_col.nnz-1]; 
                 }     
                 else {
-                    worker.b = 0;
+                    worker.old_b = 0;
                 }           
             }
         }

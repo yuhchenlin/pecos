@@ -786,14 +786,6 @@ class MLModel(pecos.BaseClass):
         Returns:
             MLModel: the trained MLModel
         """
-        if train_params is None:  # for backward compatibility
-            train_params = kwargs
-        train_params = cls.TrainParams.from_dict(train_params)
-
-        pred_params = cls.PredParams.from_dict(pred_params)
-        pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
-        if not pred_params.is_valid():
-            raise ValueError("pred_params is not valid!")
 
         if M0 is not None:
             # Currently model fine-tuning only support using L2R_L2LOSS_SVC_PRIMAL
@@ -843,10 +835,6 @@ class MLModel(pecos.BaseClass):
             MLModel: the trained MLModel
         """
 
-        model = MLModel._train(
-            prob=prob, train_params=train_params, pred_params=pred_params, **kwargs
-        )
-
         if train_params is None:  # for backward compatibility
             train_params = kwargs
         train_params = cls.TrainParams.from_dict(train_params)
@@ -855,6 +843,10 @@ class MLModel(pecos.BaseClass):
         pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
         if not pred_params.is_valid():
             raise ValueError("pred_params is not valid!")
+
+        model = MLModel._train(
+            prob=prob, train_params=train_params, pred_params=pred_params, **kwargs
+        )
 
         return cls(model, prob.pC, train_params.bias, pred_params)
 
@@ -869,6 +861,15 @@ class MLModel(pecos.BaseClass):
                 pred_kwargs (dict, optional): prediction kwargs {"only_topk": INT, "post_processor": STR}.
                     If provided, will override pred_params value. Default None to use pred_params's default
         """
+
+        if train_params is None:  # for backward compatibility
+            train_params = kwargs
+        train_params = MLModel.TrainParams.from_dict(train_params)
+
+        pred_params = MLModel.PredParams.from_dict(pred_params)
+        pred_params.override_with_kwargs(kwargs.get("pred_kwargs", None))
+        if not pred_params.is_valid():
+            raise ValueError("pred_params is not valid!")
 
         self.pW = MLModel._train(prob, self, train_params, pred_params, **kwargs)
 

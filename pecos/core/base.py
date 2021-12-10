@@ -532,6 +532,7 @@ class corelib(object):
             c_double,  # eps
             c_double,  # bias
             c_int,  # threads
+            POINTER(ScipyCscF32),  # CSC W
         ]
         corelib.fillprototype(
             self.clib_float32.c_xlinear_single_layer_train_csr_f32,
