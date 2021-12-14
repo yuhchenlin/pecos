@@ -373,6 +373,7 @@ struct SVMWorker {
     svec_wrapper_t old_w;
     value_type old_b;
     dvec_t m0;
+    bool warm_start_flag; // TODO
 
     SVMWorker(): w_size(0), y_size(0) {}
 
@@ -389,8 +390,8 @@ struct SVMWorker {
         this->index.reserve(this->y_size);    
         // remem: warm start b is old_b, delta b is b
         old_b = 0;
-        m0.resize(y_size, 0);
-
+        warm_start_flag = false; // TODO: only use this memory if there is warm start, old_w is not initialized yet
+        // m0.resize(0, 0); // m0.resize(y_size, 0); // TODO: only use this memory if there is warm start, old_w is not initialized yet
 
         if(param.solver_type == L2R_L2LOSS_SVC_DUAL) {
             alpha.resize(y_size, 0);
@@ -449,14 +450,14 @@ struct SVMWorker {
 
         auto get_diag = [&](size_t i) {
             auto class_cost = (inst_info[i].y > 0) ? param.Cp : param.Cn;
-            if (old_w.nnz > 0) {
+            if (warm_start_flag==true) { // TODO: old_w.nnz > 0 but corner case when old_w.nnz=0 but old_b!=0
                 class_cost*=0.5;
             } // remem
             return (param.solver_type == L2R_L2LOSS_SVC_DUAL)? (0.5 / (class_cost * inst_info[i].cost)) : 0.0;
         };
         auto get_upper_bound = [&](size_t i) {
             auto class_cost = (inst_info[i].y > 0) ? param.Cp : param.Cn;
-            if (old_w.nnz > 0) {
+            if (warm_start_flag==true) {
                 class_cost*=0.5;
             } // remem
             return (param.solver_type == L2R_L2LOSS_SVC_DUAL)? INF : class_cost * inst_info[i].cost;
@@ -483,14 +484,18 @@ struct SVMWorker {
 
         // remem
         // compute an additional term m for warm start
-        // change: remem: before shuffle, cal m 
-        for(size_t s = 0; s < active_size; s++) {
-            size_t i = index[s];
-            const signed char yi = inst_info[i].y;
-            const auto& xi = X.get_row(i);
+        // change: remem: before shuffle, cal m
+        if (warm_start_flag==true) { // TODO: only use this memory if there is warm start
+            for (size_t s = 0; s < active_size; s++) {
+                size_t i = index[s];
+                const signed char yi = inst_info[i].y;
+                const auto& xi = X.get_row(i);
 
-            m[i] = yi * (do_dot_product(old_w, xi));
-            m[i] += yi * old_b * param.bias; // old_b: warm start b: b* // TODO: if param.bias < 0 (no bias)
+                m[i] = yi * (do_dot_product(old_w, xi));
+                if (param.bias > 0) {
+                    m[i] += yi * old_b * param.bias; // old_b: warm start b: b*, TODO: if param.bias < 0 (no bias)
+                }
+            }
         }
 
         while(iter < param.max_iter) {
@@ -508,7 +513,10 @@ struct SVMWorker {
                 const signed char yi = inst_info[i].y;
                 const auto& xi = X.get_row(i);
 
-                float64_t G = yi * (do_dot_product(curr_w, xi) + (param.bias > 0 ? b * param.bias : 0.0)) - 1 + m[i]; // remem test:  + m[i]
+                float64_t G = yi * (do_dot_product(curr_w, xi) + (param.bias > 0 ? b * param.bias : 0.0)) - 1;
+                if (warm_start_flag==true) { // TODO: only use this memory if there is warm start
+                    G += m[i]; // remem test:  + m[i]
+                }
                 float64_t C = get_upper_bound(i);
                 G += alpha[i] * get_diag(i);
 
@@ -568,10 +576,12 @@ struct SVMWorker {
             }
         }
 
-        for(size_t s = 0; s < old_w.nnz; s++) {
-            curr_w[old_w.idx[s]] += old_w.val[s];         
+        if (warm_start_flag==true) { // TODO: only use this memory if there is warm start
+            for(size_t s = 0; s < old_w.nnz; s++) {
+                curr_w[old_w.idx[s]] += old_w.val[s];         
+            }
+            b += old_b;
         }
-        b += old_b;
     }
 
     template<typename MAT>
@@ -725,11 +735,15 @@ struct SVMJob {
         }
         worker.b = 0;
         worker.old_b = 0; // remem
+        worker.warm_start_flag = false; // TODO
 
         // remem: dual warm start: w* is sparse
         // can also check if bias > 0
+        // TODO: add warm_start_flag (To only use old_w memory if there is warm start. Also, the reason not using old_w.nnz > 0 for condition is becuz corner cases of warm start: if old_w.nnz=0, old_b!=0)
         if (W!= NULL) {
+            worker.warm_start_flag = true; // TODO
             worker.old_w = W->get_col(subcode);
+            worker.m0.resize(y_size, 0); // TODO: only use this memory if there is warm start, old_w is not initialized yet
 
             const auto& W_col = W->get_col(subcode);
             if (W_col.nnz>0 && W_col.idx[W_col.nnz-1] != w_size) {
@@ -895,7 +909,6 @@ void multilabel_train_with_codes(
     size_t nr_labels = Y->cols;
 
     threads = set_threads(threads);
-    // printf("threads: %d\n", threads);
     std::vector<svm_worker_t> worker_set(threads);
     std::vector<coo_t> model_set(threads);
 
