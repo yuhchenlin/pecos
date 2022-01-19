@@ -323,11 +323,12 @@ struct l2r_l2_svc_fun : public l2r_erm_fun<MAT, value_type, WORKER> {
 };
 
 #define INF HUGE_VAL
-template<class value_type>
+template<class value_type, class index_type=uint32_t>
 struct SVMWorker {
 
     typedef std::vector<value_type> dvec_t;
     typedef dense_vec_t<value_type> dvec_wrapper_t;
+    typedef sparse_vec_t<index_type, value_type> col_vec_t;
     typedef random_number_generator<> rng_t;
 
     struct InstInfo {
@@ -390,7 +391,7 @@ struct SVMWorker {
     }
 
     template<typename MAT>
-    void solve(const MAT& X, int seed=0) {
+    void solve(const MAT& X, int seed=0, const col_vec_t *W_col=NULL) {
         // the solution will be available in w and b
         if(param.solver_type == L2R_L1LOSS_SVC_DUAL) {
             solve_l2r_l1l2_svc(X, seed);
@@ -399,20 +400,32 @@ struct SVMWorker {
         } else if(param.solver_type == L2R_LR_DUAL) {
             solve_l2r_lr(X, seed);
         } else if (param.solver_type == L2R_L2LOSS_SVC_PRIMAL) {
-            solve_l2r_l2_svc_primal(X, seed);
+            solve_l2r_l2_svc_primal(X, seed, W_col);
         }
     }
 
     template <typename MAT>
-    void solve_l2r_l2_svc_primal(const MAT &X, int seed) {
+    void solve_l2r_l2_svc_primal(const MAT &X, int seed, const col_vec_t *W_col=NULL) { 
         l2r_l2_svc_fun<MAT, value_type, SVMWorker> fun_obj(&param, X, this);
         NEWTON<MAT, value_type, SVMWorker> newton_obj(&fun_obj);
         dvec_wrapper_t curr_w(w);
+        rng_t rng(seed);
         // re-initialize w and b
         for(size_t j = 0; j < w_size; j++) {
             curr_w[j] = 0;
         }
-        b = 0;
+        b = 0;          
+
+        if (W_col!= NULL) {
+            for (size_t idx = 0; idx < W_col->nnz; idx++) {
+                if (W_col->idx[idx] < w_size) {
+                    curr_w[W_col->idx[idx]] = W_col->val[idx];
+                }
+                else {
+                    b = W_col->val[idx];
+                }
+            }
+        }
         newton_obj.newton(curr_w, b);
     }
 
@@ -633,14 +646,16 @@ struct SVMWorker {
     }
 };
 
-template<class MAT, class value_type=float64_t>
+template<class MAT, class value_type=float64_t, class index_type=uint32_t>
 struct SVMJob {
+    typedef sparse_vec_t<index_type, value_type> col_vec_t;
     typedef SVMWorker<value_type> svm_worker_t;
     const MAT* feat_mat; // n \times d
     const csc_t* Y;      // n \times L
     const csc_t* C;      // L \times k: NULL to denote the pure Multi-label setting
     const csc_t* M;      // n \times k: NULL to denote the pure Multi-label setting
     const csc_t* R;      // n \times L: NULL to denote NOT-USING the relevance value for cost-sensitive learning
+    const csc_t* W;      // d \times L
     size_t code;         // code idx in C (i.e., column index of C)
     size_t subcode;      // index of the label with code (i.e. column index of Y or row index of C)
     const SVMParameter *param_ptr;
@@ -651,6 +666,7 @@ struct SVMJob {
         const csc_t* C,
         const csc_t* M,
         const csc_t* R,
+        const csc_t* W,
         size_t code,
         size_t subcode,
         const SVMParameter *param_ptr=NULL
@@ -660,6 +676,7 @@ struct SVMJob {
         C(C),
         M(M),
         R(R),
+        W(W),
         code(code),
         subcode(subcode),
         param_ptr(param_ptr) { }
@@ -716,7 +733,13 @@ struct SVMJob {
      * Store *max_nonzeros* parameters with the absolute value >= *threshold* into  *coo_model*
      * */
     void solve(svm_worker_t& worker, coo_t& coo_model, double threshold=0.0, uint32_t max_nonzeros=0) const {
-        worker.solve(*feat_mat);
+        if (W!= NULL) {
+            const auto &W_col = W->get_col(subcode);
+            worker.solve(*feat_mat, 0, &W_col);
+        }
+        else {
+            worker.solve(*feat_mat, 0);
+        }       
         if(max_nonzeros == 0) {
             for(size_t i = 0; i < worker.w_size; i++) {
                 coo_model.push_back(i, subcode, worker.w[i], threshold);
@@ -791,6 +814,7 @@ struct SVMJob {
 // C: shape of L \times K, the label-to-cluster matrix for selecting inst/labels within same cluster
 // M: shape of N \times K, the instance-to-cluster matrix for negative sampling
 // R: shape of N \times L, the relevance matrix for cost-sensitive learning
+// W: shape of D \times L, the weight matrix for fine tune
 // Note that we assume Y and R has the same nonzero patterns (same indices and indptr),
 // which is verified in the (pecos.xmc.base) MLProblem constructor.
 // See more details in Eq. (10) of PECOS arxiv paper (Yu et. al., 2020)
@@ -801,6 +825,7 @@ void multilabel_train_with_codes(
     const csc_t *C,
     const csc_t *M,
     const csc_t *R,
+    const csc_t *W,
     coo_t *model,
     double threshold,
     uint32_t max_nonzeros_per_label,
@@ -832,14 +857,14 @@ void multilabel_train_with_codes(
             const auto& C_code = C->get_col(code);
             for(size_t idx = 0; idx < C_code.nnz; idx++) {
                 size_t subcode = static_cast<size_t>(C_code.idx[idx]);
-                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, code, subcode, param));
+                job_queue.push_back(svm_job_t(feat_mat, Y, C, M, R, W, code, subcode, param));
             }
         }
     } else {
         // either C == NULL or M == NULL
         // pure multi-label setting
         for(size_t subcode = 0; subcode < nr_labels; subcode++) {
-            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, 0, subcode, param));
+            job_queue.push_back(svm_job_t(feat_mat, Y, NULL, NULL, R, W, 0, subcode, param));
         }
     }
 #pragma omp parallel for schedule(dynamic, 1)
@@ -862,4 +887,4 @@ void multilabel_train_with_codes(
 } // end of namespace linear_solver
 } // end of namespace pecos
 
-#endif // end of __LINEAR_SOLVER_H__
+#endif // end of __LINEAR_SOLVER_H__.

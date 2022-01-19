@@ -181,6 +181,7 @@ extern "C" {
         const ScipyCscF32 *pC, \
         const ScipyCscF32 *pM, \
         const ScipyCscF32 *pR, \
+        const ScipyCscF32 *pW, \
         py_coo_allocator_t coo_alloc, \
         double threshold, \
         uint32_t max_nonzeros_per_label, \
@@ -196,6 +197,7 @@ extern "C" {
         const pecos::csc_t& C = (pC == NULL) ? pecos::csc_t() : pecos::csc_t(pC); \
         const pecos::csc_t& M = (pM == NULL) ? pecos::csc_t() : pecos::csc_t(pM); \
         const pecos::csc_t& R = (pR == NULL) ? pecos::csc_t() : pecos::csc_t(pR); \
+        const pecos::csc_t& W = (pW == NULL) ? pecos::csc_t() : pecos::csc_t(pW); \
         pecos::linear_solver::SVMParameter param(solver_type, Cp, Cn, max_iter, eps, bias); \
         pecos::coo_t model; \
         pecos::linear_solver::multilabel_train_with_codes(\
@@ -204,6 +206,7 @@ extern "C" {
             (pC == NULL) ? NULL : &C, \
             (pM == NULL) ? NULL : &M, \
             (pR == NULL) ? NULL : &R, \
+            (pW == NULL) ? NULL : &W, \
             &model, \
             threshold, \
             max_nonzeros_per_label, \

@@ -522,6 +522,7 @@ class corelib(object):
             POINTER(ScipyCscF32),  # CSC C
             POINTER(ScipyCscF32),  # CSC M
             POINTER(ScipyCscF32),  # CSC R
+            POINTER(ScipyCscF32),  # CSC W
             ScipyCoordinateSparseAllocator.CFUNCTYPE,  # py_coo_allocator
             c_double,  # threshold
             c_uint32,  # max_nonzeros_per_label
@@ -980,6 +981,7 @@ class corelib(object):
         pC,
         pM,
         pR,
+        pW=None,
         threshold=0.1,
         max_nonzeros_per_label=None,
         solver_type="L2R_L2LOSS_SVC_DUAL",
@@ -1001,6 +1003,7 @@ class corelib(object):
             pC (ScipyCscF32): Single matrix from clustering chain, representing a hierarchical clustering.
             pM (ScipyCsrF32): Single matrix from matching chain.
             pR (ScipyCscF32): Relevance matrix for cost-sensitive learning, of shape (nr_inst, nr_labels).
+            pW (ScipyCscF32): Weight matrix from trained model for warm start, of shape (nr_feat, nr_labels). Default None to start from zeros (disable warm start).
             threshold (float, optional): sparsify the final model by eliminating all entrees with abs value less than threshold.
                 Default to 0.1.
             max_nonzeros_per_label (int, optional): keep at most NONZEROS weight parameters per label in model.
@@ -1027,12 +1030,27 @@ class corelib(object):
         else:
             raise NotImplementedError("type(pX) = {} not implemented".format(type(pX)))
 
+        if pW is not None:
+            # Currently model fine-tuning only support using L2R_L2LOSS_SVC_PRIMAL
+            # Assuming using newton_eps in train_params
+            if solver_type != "L2R_L2LOSS_SVC_PRIMAL":
+                raise ValueError("Currently only support using L2R_L2LOSS_SVC_PRIMAL.")
+
+            # Assert X and Y dimensions are valid
+            assert (
+                pX.shape[1] + (bias > 0) == pW.shape[0]
+            ), f"pX.shape[1] = {pX.shape[1] + (bias > 0)} != {pW.shape[0]} = pW.shape[0]"
+            assert (
+                pY.shape[1] == pW.shape[1]
+            ), f"pY.shape[1] = {pY.shape[1]} != {pW.shape[1]} = pW.shape[1]"
+
         c_xlinear_single_layer_train(
             byref(pX),
             byref(pY),
             byref(pC) if pC is not None else None,
             byref(pM) if pM is not None else None,
             byref(pR) if pR is not None else None,
+            byref(pW) if pW is not None else None,
             coo_alloc.cfunc,
             threshold,
             0 if max_nonzeros_per_label is None else max_nonzeros_per_label,
