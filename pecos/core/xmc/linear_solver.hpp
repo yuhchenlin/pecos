@@ -862,4 +862,4 @@ void multilabel_train_with_codes(
 } // end of namespace linear_solver
 } // end of namespace pecos
 
-#endif // end of __LINEAR_SOLVER_H__.
+#endif // end of __LINEAR_SOLVER_H__..
